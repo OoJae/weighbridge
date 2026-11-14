@@ -65,10 +65,15 @@ def verify_weights(model_dir: Path) -> dict:
     return report
 
 
-def pip_install(packages: list[str]) -> None:
+def pip_install(packages: list[str], required: bool = True) -> None:
+    """Install packages; a failed optional install is logged and the run goes on."""
     if packages:
-        log(f"pip install {' '.join(packages)}")
-        subprocess.run([sys.executable, "-m", "pip", "install", "-q", *packages], check=True)
+        log(f"pip install {' '.join(packages)} ({'required' if required else 'optional'})")
+        done = subprocess.run([sys.executable, "-m", "pip", "install", "-q", *packages])
+        if done.returncode != 0:
+            if required:
+                raise SystemExit(f"required pip install failed: {packages}")
+            log(f"optional install failed, continuing: {packages}")
 
 
 def run_queue(gpu: str, jobs: list[dict], env: dict, subs: dict, status: dict) -> None:
@@ -88,6 +93,8 @@ def main() -> None:
     for d in (OUT, LOGS, PRIVATE):
         d.mkdir(parents=True, exist_ok=True)
     pip_install(PLAN.get("pip", []))
+    pip_install(PLAN.get("pip_optional", []), required=False)
+    log(f"python {sys.version.split()[0]}")
 
     bundle = find_one("**/wb_bundle")
     model_dir = find_one("**/tiny-aya/transformers/global/*")

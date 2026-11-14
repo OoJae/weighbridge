@@ -26,7 +26,9 @@ from contextlib import contextmanager
 from datetime import UTC, date, datetime
 from functools import lru_cache, partial
 from pathlib import Path, PurePosixPath
-from typing import Any, NamedTuple
+from typing import Any, NamedTuple, TypeVar
+
+T = TypeVar("T")
 
 from . import __version__
 from .common import (BASE_REPO, BASE_REVISION, CACHE_DIR, N_LAYERS, PRIVATE_DIR, REPO_ROOT, TARGET_MODULES,
@@ -504,7 +506,7 @@ def _backoff(err: OSError, attempt: int, delay: float, cap: float = 120.0) -> fl
     return min(cap, float(retry_after) if retry_after.isdigit() else delay * 2 ** attempt)
 
 
-def _retry[T](call: Callable[[], T], attempts: int = 8, delay: float = 2.0) -> T:
+def _retry(call: Callable[[], T], attempts: int = 8, delay: float = 2.0) -> T:
     """Call with backoff on transient Hub errors (rate limits, server errors, dropped connections)."""
     for attempt in range(attempts - 1):
         try:

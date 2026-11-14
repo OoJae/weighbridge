@@ -152,9 +152,12 @@ def _load_guard_hf() -> tuple[Any, Any]:
 
     tokenizer = AutoTokenizer.from_pretrained(GUARD_REPO, revision=GUARD_REVISION)
     tokenizer.padding_side = "left"
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    model = AutoModelForCausalLM.from_pretrained(GUARD_REPO, revision=GUARD_REVISION, dtype="auto")
-    return model.to(device).eval(), tokenizer
+    cuda = torch.cuda.is_available()
+    # bf16 only where the GPU has it natively (compute capability 8+); a T4 gets fp16, which the judge-validation
+    # job checks against human labels before the judge is trusted.
+    dtype = (torch.bfloat16 if torch.cuda.get_device_capability()[0] >= 8 else torch.float16) if cuda else torch.float32
+    model = AutoModelForCausalLM.from_pretrained(GUARD_REPO, revision=GUARD_REVISION, dtype=dtype)
+    return model.to("cuda" if cuda else "cpu").eval(), tokenizer
 
 
 def _generate_hf(model: Any, tokenizer: Any, texts: Sequence[str], batch_size: int,
