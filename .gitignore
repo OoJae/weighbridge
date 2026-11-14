@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+
+# Never commit private or third-party material (see DECISIONS.md):
+# the population manifest, downloaded adapters, raw generations of third-party adapters.
+private/
+cache/
+runs/raw/
+*.safetensors
+*.bin
+*.gguf
+
+# Local notes
+.DS_Store
