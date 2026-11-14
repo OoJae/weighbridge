@@ -58,28 +58,23 @@ What is and is not new is set out in `docs/RELATED_WORK.md`.
 
 ## Kits used
 
-### CuratorKIT
-- The adapter manifest as a dataset, with counts before and after each exclusion rule.
-- Prompt panels: exact, MinHash and embedding deduplication, and leak checks between every panel and its sources.
-- Author-grouped splits with a leakage report, for the leave-one-author-out baselines.
-- Pinned commit: [sha].
+### CuratorKIT (0.1.28)
+- `curatorkit.splits.leakage_report` checks every pair of model-input prompt panels for exact duplicates and MinHash
+  near duplicates (character 3-grams, Jaccard ≥ 0.7), next to our own n-gram check. Report:
+  `data/panels/CURATORKIT_LEAK_REPORT.json` (one flagged pair, a JailbreakBench harmful/benign twin kept by design).
 
-### AuditKIT
-- Rescoring of saved generations with its guard judge (Qwen3Guard) and multilingual refusal scorer.
-- Judge calibration against human labels (κ).
-- Paired bootstrap per adapter and per-language deltas.
-- Logs pushed to the Hub with provenance, for the base model and our own adapters only.
-- Pinned commit: [sha].
+### AuditKIT (1.1.12)
+- Paired bootstraps over prompts with `auditkit.compare(...).significance(...)`, fed our judge labels as
+  precomputed outputs with a custom scorer (`weighbridge/audit.py`): each sentinel against the base model and each
+  repaired sentinel against its unrepaired self, for harmful compliance and over-refusal.
 
-### SafeTune
-- Refusal directions (the activation-space reference for D0a and D1p).
-- SafeLoRA and WiSE-FT, as the repair comparators and the SafeLoRA screening baseline.
-- Over-refusal evaluation.
-- Pinned commit: [sha].
+### SafeTune (0.1.19)
+- `safetune.recover.apply_safe_lora`, with the kit's defaults, is the SafeLoRA repair comparator in C3, using Tiny Aya
+  Global as the aligned model and Tiny Aya Base as the unaligned one (`jobs/job_c3.py safelora`).
 
-### AlignTune
-- Trains the four sentinel adapters (known-answer controls) on benign data, and exports GGUF.
-- Pinned commit: [sha].
+### AlignTune (0.1.35)
+- Trains the four sentinel adapters (known-answer controls) on benign data, through its TRL backend
+  (`jobs/job_sentinels.py`).
 
 ### CircuitKIT (Stage 2)
 - A version of D0b restricted to the units CircuitKIT attributes to refusal.

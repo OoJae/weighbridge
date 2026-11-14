@@ -110,6 +110,53 @@ def cmd_build_b(args: argparse.Namespace) -> None:
     c3.write_shard(rows, args.shard)
 
 
+# ---- SafeLoRA (SafeTune) -------------------------------------------------------------------------
+
+def cmd_safelora(args: argparse.Namespace) -> None:
+    """SafeTune's SafeLoRA on every sentinel, with the kit's own defaults (threshold selection), on the CPU.
+
+    The aligned weights are the PEFT backbone (Tiny Aya Global); the unaligned ones are Tiny Aya Base's target
+    projections, read lazily from its shards. Each projected adapter is saved as <sentinel>__safelora.
+    """
+    import torch
+    from peft import PeftModel
+    from safetensors import safe_open
+    from safetune.recover import apply_safe_lora
+    from transformers import AutoModelForCausalLM
+
+    from weighbridge import c3
+    from weighbridge.common import TARGET_MODULES
+
+    names = {}
+    for shard in sorted(args.base_model.glob("*.safetensors")):
+        with safe_open(str(shard), framework="pt") as f:
+            names.update({k: shard for k in f.keys() if k.endswith(".weight") and k.split(".")[-2] in TARGET_MODULES})
+    base_sd = {}
+    for k, shard in names.items():
+        with safe_open(str(shard), framework="pt") as f:
+            base_sd[k] = f.get_tensor(k).to(torch.bfloat16)
+    log.info("SafeLoRA: %d base target matrices", len(base_sd))
+    model = AutoModelForCausalLM.from_pretrained(str(args.global_model), dtype=torch.bfloat16).eval()
+    rows = []
+    for s in SENTINELS:
+        folder = args.sentinels / s
+        if not (folder / "adapter_model.safetensors").exists():
+            continue
+        peft = PeftModel.from_pretrained(model, str(folder))
+        before = {n: p.detach().clone() for n, p in peft.named_parameters() if "lora_B" in n}
+        apply_safe_lora(peft, aligned_state_dict=peft.state_dict(), base_state_dict=base_sd)
+        changed = sum(not torch.equal(before[n], p) for n, p in peft.named_parameters() if "lora_B" in n)
+        out = args.out_root / f"{s}__safelora"
+        peft.save_pretrained(str(out))
+        rows.append({"alias": f"{s}__safelora", "local_path": str(out.resolve()), "status": "included", "parent": s,
+                     "method": "safelora", "repair": {"kind": "safelora", "tool": "safetune==0.1.19",
+                                                      "settings": "kit defaults (threshold selection)",
+                                                      "modules_projected": changed, "modules": len(before)}})
+        log.info("%s: SafeLoRA projected %d of %d LoRA modules", s, changed, len(before))
+        model = peft.unload()
+    c3.write_shard(rows, args.shard)
+
+
 # ---- fidelity ----------------------------------------------------------------------------------
 
 def heldout_rows(sentinel: str, n: int, config_path: Path | None = None) -> list[list[dict[str, str]]]:
@@ -272,14 +319,35 @@ def c3_report(outcomes: dict[str, dict[str, float]], fidelity: dict[str, dict[st
             continue
         wise = {lam: stats(parent, f"wise-{lam:g}") for lam in c3.WISE_LAMS}
         rand = stats(parent, f"random-k{k}")
+        safe = stats(parent, "safelora")
         curve = [(w["recovery"], w["kl"], w["task_score"]) for w in wise.values() if w]
         report["repaired"][parent] = {
             "y_before": outcomes[parent]["y"], "project": main, "wise": {str(k_): v for k_, v in wise.items()},
-            "random": rand,
+            "random": rand, "safelora": safe,
             **c3.success_criteria(main, rand["recovery"] if rand else math.nan, curve,
                                   control["over_refusal_rise"] if control else None),
         }
     return report
+
+
+def auditkit_deltas(labels: Any, k: int) -> dict[str, Any]:
+    """AuditKIT paired bootstraps (English, shipped): each sentinel against the base model, and each repaired
+    sentinel against its unrepaired parent, for harmful compliance and over-refusal."""
+    from weighbridge.audit import paired_delta
+
+    en = labels[(labels["lang"] == "en") & (labels["condition"] == "shipped")]
+    rows = {a: g.to_dict("records") for a, g in en.groupby("adapter_alias")}
+    base = rows.get("__base__", [])
+    out: dict[str, Any] = {}
+    for alias, own in sorted(rows.items()):
+        if alias == "__base__":
+            continue
+        parent, _, method = alias.partition("__")
+        ref, versus = (base, "base") if not method else (rows.get(parent, []), parent)
+        if ref:
+            out[alias] = {"versus": versus, **{m: paired_delta(ref, own, m)
+                                               for m in ("harmful_compliance", "over_refusal")}}
+    return out
 
 
 def cmd_report(args: argparse.Namespace) -> None:
@@ -289,6 +357,7 @@ def cmd_report(args: argparse.Namespace) -> None:
     fidelity = {r["alias"]: r for p in args.fidelity for r in read_jsonl(p)}
     k = json.loads(args.choice.read_text())["k"]
     report = c3_report(outcomes, fidelity, k)
+    report["auditkit_paired"] = auditkit_deltas(_labels(args.labels), k)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(report, indent=1, default=float))
     log.info("C3 report written: %s", args.out)
@@ -306,6 +375,12 @@ def main(argv: Sequence[str] | None = None) -> None:
         p.add_argument("--out-root", type=Path, required=True, help="where the repaired PEFT folders go")
         p.add_argument("--shard", type=Path, required=True, help="output shard JSONL for job_sweep")
     b.add_argument("--choice", type=Path, required=True)
+    sl = sub.add_parser("safelora")
+    sl.add_argument("--sentinels", type=Path, required=True)
+    sl.add_argument("--global-model", type=Path, required=True)
+    sl.add_argument("--base-model", type=Path, required=True, help="Tiny Aya Base checkpoint folder")
+    sl.add_argument("--out-root", type=Path, required=True)
+    sl.add_argument("--shard", type=Path, required=True)
     c = sub.add_parser("choose")
     c.add_argument("--labels", type=Path, nargs="+", required=True, help="judge label files or folders")
     c.add_argument("--out", type=Path, required=True)
@@ -323,7 +398,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     r.add_argument("--choice", type=Path, required=True)
     r.add_argument("--out", type=Path, required=True)
     args = ap.parse_args(argv)
-    {"build-a": cmd_build_a, "choose": cmd_choose, "build-b": cmd_build_b, "fidelity": cmd_fidelity,
+    {"build-a": cmd_build_a, "choose": cmd_choose, "safelora": cmd_safelora, "build-b": cmd_build_b, "fidelity": cmd_fidelity,
      "report": cmd_report}[args.cmd](args)
 
 

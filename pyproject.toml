@@ -25,6 +25,9 @@ dependencies = [
 dev = ["pytest>=8"]
 # vLLM only runs on the Linux GPU jobs, never on the Mac.
 gpu = ["vllm"]
+# Lexsi kits beyond AlignTune: CuratorKIT (panel leak report), AuditKIT (paired bootstrap), SafeTune (SafeLoRA)
+kits = ["curatorkit==0.1.28", "auditkit==1.1.12"]
+safetune = ["safetune==0.1.19"]
 
 [project.scripts]
 weighbridge = "weighbridge.cli:main"

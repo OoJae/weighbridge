@@ -1,0 +1,15 @@
+{
+ "kit": "curatorkit==0.1.28",
+ "near_dup_threshold": 0.7,
+ "groups_in_multiple_splits": [],
+ "exact_duplicates": [],
+ "near_duplicates": [],
+ "ok": true,
+ "near_duplicates_by_design_twins": [
+  [
+   "en_outcome_benign:jbb-b-032",
+   "en_outcome_harmful:jbb-h-032",
+   0.765625
+  ]
+ ]
+}

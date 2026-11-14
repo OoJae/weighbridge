@@ -548,6 +548,39 @@ def build_native_panels(final_dir: Path = NATIVE_FINAL_DIR) -> dict[str, list[di
             if (final_dir / f"{lang}.csv").exists()}
 
 
+
+CURATORKIT_NEAR_DUP = 0.7  # MinHash Jaccard on character 3-grams; 0.8 (the kit default) misses one-word edits
+
+
+def curatorkit_leak_report(panels: Mapping[str, Sequence[Mapping[str, Any]]],
+                           threshold: float = CURATORKIT_NEAR_DUP) -> dict:
+    """CuratorKIT's cross-panel leakage report: exact duplicates (case and whitespace folded) and MinHash near
+    duplicates between every pair of model-input panels, plus pairs that share a source item (pair_id).
+
+    Complements :func:`leak_check` (our own n-gram check) with the kit's independent implementation.
+    """
+    from curatorkit.schema import DataSample
+    from curatorkit.splits import leakage_report
+
+    splits = {name: [DataSample(id=f"{name}:{r['id']}", source_uri=str(r.get("source", "")), instruction=r["text"],
+                                task_type="prompt_only", metadata={"pair_id": str(r.get("pair_id") or r["id"])})
+                     for r in rows]
+              for name, rows in panels.items() if name not in NON_INPUT_PANELS}
+    report = dict(leakage_report(splits, near_dup_threshold=threshold))
+    pair = {f"{name}:{r['id']}": str(r.get("pair_id") or r["id"]) for name, rows in panels.items() for r in rows}
+    twins = {"en_outcome_harmful", "en_outcome_benign"}
+
+    def by_design(a: str, b: str) -> bool:
+        # JailbreakBench harmful behaviours and their benign look-alikes are twins on purpose (Y vs over-refusal).
+        return {a.split(":")[0], b.split(":")[0]} == twins and pair.get(a) == pair.get(b)
+
+    near = [tuple(x) for x in report.get("near_duplicates", [])]
+    report["near_duplicates_by_design_twins"] = [x for x in near if by_design(x[0], x[1])]
+    report["near_duplicates"] = [x for x in near if not by_design(x[0], x[1])]
+    report["ok"] = not (report["near_duplicates"] or report.get("exact_duplicates")
+                        or report.get("groups_in_multiple_splits"))
+    return {"kit": "curatorkit==0.1.28", "near_dup_threshold": threshold, **report}
+
 def write_all(seed: int = 0, panels_dir: Path = PANELS_DIR) -> LeakReport:
     """Build, leak-check and write every panel plus ``LEAK_CHECK.md``; raise if the leak check fails."""
     panels = build_panels(seed) | build_native_panels()
@@ -557,6 +590,11 @@ def write_all(seed: int = 0, panels_dir: Path = PANELS_DIR) -> LeakReport:
     for name, rows in panels.items():
         write_panel(rows, name, panels_dir)
     (panels_dir / "LEAK_CHECK.md").write_text(report.to_markdown(), encoding="utf-8")
+    kit = curatorkit_leak_report(panels)
+    (panels_dir / "CURATORKIT_LEAK_REPORT.json").write_text(json.dumps(kit, indent=1, default=list) + "\n",
+                                                            encoding="utf-8")
+    if not kit["ok"]:
+        raise RuntimeError(f"CuratorKIT leak report failed: {kit}")
     return report
 
 

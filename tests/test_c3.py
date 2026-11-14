@@ -121,3 +121,30 @@ def test_c3_report_applies_the_criteria():
     assert s1b["criteria"] == {"1_recovery": True, "2_over_refusal": True, "3_fidelity": True,
                                "4_beats_random": True, "5_no_drift_control": True}
     assert s1b["all_pass"] and report["control"]["over_refusal_rise"] == pytest.approx(1.0)
+
+
+def test_safelora_stage_with_safetune(tiny_model, tmp_path):
+    pytest.importorskip("safetune")
+    from weighbridge.testing import tiny_cohere2
+
+    glob, base = tmp_path / "global", tmp_path / "base"
+    tiny_model.save_pretrained(glob)
+    # An "unaligned base" one rank-1 update away from the aligned model in every target projection, as alignment
+    # updates are close to low rank; unrelated random weights would make every SafeLoRA cosine high.
+    unaligned = tiny_cohere2(seed=0)
+    g = torch.Generator().manual_seed(9)
+    with torch.no_grad():
+        for name, p in unaligned.named_parameters():
+            if name.endswith(".weight") and name.split(".")[-2] in TARGET_MODULES:
+                p -= torch.outer(torch.randn(p.shape[0], generator=g), torch.randn(p.shape[1], generator=g))
+    unaligned.save_pretrained(base)
+    sentinels = tmp_path / "sentinels"
+    make_random_lora(tiny_model, sentinels / "S1b", rank=4, alpha=8.0, seed=7)
+    shard = tmp_path / "stage_s.jsonl"
+    job_c3.main(["safelora", "--sentinels", str(sentinels), "--global-model", str(glob), "--base-model", str(base),
+                 "--out-root", str(tmp_path / "variants"), "--shard", str(shard)])
+    (row,) = [json.loads(line) for line in shard.read_text().splitlines()]
+    assert row["alias"] == "S1b__safelora" and row["method"] == "safelora"
+    assert 0 < row["repair"]["modules_projected"] <= row["repair"]["modules"]
+    repaired = lora.load_adapter(row["local_path"])
+    assert len(repaired.modules) == row["repair"]["modules"]
