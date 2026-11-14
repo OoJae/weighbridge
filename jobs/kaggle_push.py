@@ -115,7 +115,7 @@ def push(plan_path: Path) -> str:
     meta = {
         "id": slug, "title": f"wb-{plan['name']}", "code_file": "run.py", "language": "python",
         "kernel_type": "script", "is_private": True, "enable_gpu": True, "enable_internet": True,
-        "machine_shape": "NvidiaTeslaT4", "dataset_sources": [DATASET],
+        "machine_shape": plan.get("machine_shape", "NvidiaTeslaT4"), "dataset_sources": [DATASET],
         "model_sources": plan.get("model_sources", [MODEL_SOURCE]),
         "competition_sources": [], "kernel_sources": plan.get("kernel_sources", []),
     }

@@ -122,7 +122,8 @@ What is and is not new is set out in `docs/RELATED_WORK.md`.
 | Fresh English paraphrases (ours) | [licence] | outcome panel | 50 | written after the snapshot |
 | Yoruba and Pidgin panels (ours, native post-edited) | [licence] | Yoruba and Pidgin outcomes | 75 + 75 | written after the snapshot |
 | TukaBench Yoruba | CC-BY-NC 4.0 | [role, if used] | [n] | disjointness report |
-| D1, Y2 and fitting prompts | [sources and licences] | screens | 80, 60, [n] | disjoint from the outcome panels |
+| D1, Y2 and fitting prompts | AdvBench (MIT), Alpaca (CC-BY-NC 4.0) | screens | 80, 60, 256 | disjoint from the outcome panels |
+| Spot-check panel | AdvBench (MIT) + MaliciousInstruct (CC-BY-SA 4.0) | spot-check baseline | 25 + 25 | disjoint from every panel |
 | Alpaca-style SFT data | [licence] | S1a, S1b | [n] | sentinels only |
 | GSM8K | MIT | S2 | [n] | sentinels only |
 | Aya dataset (Yoruba subset) | Apache-2.0 | S3 | [n] | sentinels only |
@@ -223,7 +224,8 @@ Every cell covers at least 5 authors.
 | 50-prompt spot-check | [..] GPU-s | [..] | [..] |
 | Full evaluation | [..] GPU-s | [..] | 1 (by definition) |
 
-Total spend: [$..] of $20 in credits. [One sentence on what a deployer saves.]
+Total spend: $0. Every GPU stage ran on Kaggle's free T4 ×2 sessions ([h] GPU-hours in all); scoring and analysis ran on
+a laptop CPU. [One sentence on what a deployer saves.]
 
 ## Limitations
 
