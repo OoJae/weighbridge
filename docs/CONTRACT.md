@@ -162,8 +162,9 @@ Keys are always `(layer, module)`, for example `(3, "down_proj")`.
 - `log_delta_norm(adapter) -> float`; `spectral_baseline(adapter) -> dict`.
 - `safelora_similarity(adapter, danger: dict[key, Tensor]) -> float`: mean over modules of the cosine between
   `scaling·B@A` and a danger delta (or its projection onto the danger basis).
-- Controls: `random_direction_score(adapter, like: dict[key, Tensor], seed) -> float` (a Gaussian G with matched
-  per-module Frobenius norms) and `t0b_first_order(adapter, G_irrelevant)` for a gradient of an irrelevant metric.
+- Controls: `random_direction_scores(adapter, sketch, n=200, seed=0) -> Tensor (n,)` (each module's sketch singular
+  values with Haar-random singular vectors; direction j is identical for every adapter) and
+  `t0b_first_order(adapter, G_irrelevant)` for a gradient of an irrelevant metric.
 - Sign convention: **drift = -score**, so larger drift means less refusal.
 
 ### `repair.py` (training-free repairs that stay LoRA-shaped)
@@ -173,7 +174,7 @@ Keys are always `(layer, module)`, for example `(3, "down_proj")`.
 - `random_projection(adapter, k, seed, side="left") -> Adapter`: the same as `project_out` with random orthonormal bases.
 
 ### `runner_peft.py` and `runner_vllm.py` (behaviour)
-- `generate_peft(base_model_id, adapters: list[tuple[alias, path]], panel_rows, conditions, max_new_tokens=64,
+- `generate_peft(base_model_id, adapters: list[tuple[alias, path]], panel_rows, conditions, max_new_tokens=160,
   batch_size=16, out_path) -> Path`: loads the base once, hot-swaps with load_adapter / set_adapter / delete_adapter,
   decodes greedily with `eos_token_id=list(STOP_TOKEN_IDS)` and left padding, writes Generation rows, and is
   resumable (skips rows already written).
@@ -189,7 +190,7 @@ Keys are always `(layer, module)`, for example `(3, "down_proj")`.
   flagged as needing native review.
 - `lang_id(texts) -> list[tuple[str, float]]`: GlotLID through fasttext, imported lazily, falling back to a simple
   heuristic when unavailable.
-- `three_way(kind, guard, string_refusal, lid_lang, expected_lang, text) -> str`.
+- `three_way(kind, guard_safety, guard_refusal, string_refused, lid_lang, expected_lang, text) -> str`.
 - `cohen_kappa(a, b) -> float`.
 
 ### `stats.py`
@@ -202,3 +203,20 @@ Keys are always `(layer, module)`, for example `(3, "down_proj")`.
 - `load_panel(name) -> list[dict]`, `write_panel(rows, name)`, `split_rows(rows, seed)`.
 - Panel builders for JailbreakBench (harmful, benign and judge_comparison), XSTest safe, TukaBench Yoruba, and the
   native Yoruba / Pidgin sets (read from `data/native/final/*.csv` once the human has post-edited them).
+
+### `scoring.py` (weights-only scores of local adapters; added at integration)
+- `load_probe_artifacts(folder, lang="en", condition="shipped") -> ProbeArtifacts`: reads `jobs/job_probe.py` output
+  (`directions_{condition}`, keys `L{layer}`; `input_means_{lang}`, keys `L{layer}.{module}`; `sketch_{lang}_{condition}`
+  and optional `grad_{lang}_{condition}`, `grad|sketch_irrelevant` in `grad.save` format).
+- `find_adapters(root) -> list[(alias, folder)]`, `score_adapter(adapter, art, danger=None) -> dict`,
+  `score_folder(root, art, danger=None, n_random=0, seed=0) -> (scores DataFrame, random DataFrame | None)`.
+  Every score column is drift-oriented (higher = predicted more harmful).
+
+### `analysis.py` (pre-registered analyses; added at integration)
+- `analyze(scores, t1_rows, label_rows, manifest_rows, confirmatory, d1_ids, y2_ids, random=None, n_boot=10000,
+  seed=0, n_splits=100) -> (results dict, per-adapter DataFrame)`: outcome table and C1 categories, D1 / D1p / −Y2
+  from T1 rows, H1–H3 with author-cluster bootstrap and Holm, the verdict, the random-direction bar, the noise
+  ceiling, AUROC, linearity and the C1 table. `render_markdown(results) -> str`.
+
+### `cli.py`
+- `weighbridge snapshot | panels | score | analyze | repair`: thin wrappers over the modules above.

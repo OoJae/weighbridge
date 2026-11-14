@@ -1,0 +1,57 @@
+# Rules for building the adapter population (read by src/weighbridge/hub.py).
+#
+# Keyword matching works on normalised text: lower case, with every run of non-alphanumeric
+# characters collapsed to one space. A "prefix" keyword matches at the start of a word (so "drift"
+# matches "drifted" and "abliterat" matches "abliterated"). An "exact" keyword must be a whole word
+# (so "lisa" does not match "lisan", and "rag" does not match "ragged"). Multi-word keywords match
+# across word boundaries ("refusal steer" matches "refusal-steering").
+
+# Adapters created on or after this date count as hackathon era.
+hackathon_start: "2026-11-01"
+
+# Tags that carry no intent or method signal (library, hosting and licence metadata).
+ignore_tag_prefixes: ["base_model:", "region:", "license:", "arxiv:", "doi:", "endpoints_"]
+# Topic tags that name the field (most hackathon entries carry them), not the adapter's intent.
+ignore_tags: [safety, ai-safety, safety-research, llm-safety, multilingual-safety, youth-safety, clinical-safety,
+              safety-drift, safetune, alignment, ai-alignment]
+# Words removed before matching because they collide with keywords ("safetensors").
+ignore_tokens: [safetensors]
+
+# The model card is read only up to the first heading that starts one of these boilerplate sections,
+# and at most card_chars characters of it are used.
+card_stop_headings: [limitation, bias, risk, out of scope, disclaimer, ethic, citation, license,
+                     framework version, more information, environmental impact, model card contact]
+card_chars: 2000
+
+# Declared intent. Safety-relevant intent (the first three categories) must be declared in the repo name
+# or tags: when they disagree, or when safety words appear only in the model card, the intent is unknown.
+# Card text alone can establish only "task", and control words in a card are ignored (cards say "none" and
+# "baseline" in tables and comparisons). Words such as "safe" and "guard" are whole-word matches so
+# that project names built on them ("safetypulse", "guardian") do not count as declarations.
+intent:
+  attack_or_drift:
+    prefix: [drift, unalign, attack, harmful, jailbreak, abliterat, uncensor, misalign, desafet,
+             de safet, red team, redteam, backdoor, poison]
+    exact: []
+  safety_hardened:
+    prefix: [harden, refusal steer, repair, safegrad, safetun, safety tun, safety align, vaccine, booster,
+             secalign, injection defen, guardrail]
+    exact: [safe, safer, safety, guard, guarded, lisa, resta]
+  control:
+    prefix: [control, baseline, no op, noop, seed control]
+    exact: [none, plain, random, null adapter, zero adapter]
+  task:
+    prefix: [sql, agent, tool, banking, financ, extraction, json, retrieval, translat, summari,
+             medical, clinical, legal, math, gsm8k, chat, assistant, function call, classif]
+    exact: [rag, qa, code, coder, coding]
+
+# Training method. A preference or RL method overrides an SFT mention (SFT is usually the warm start);
+# two different preference or RL methods together are ambiguous and give unknown.
+method:
+  dpo: {prefix: [dpo, direct preference], exact: []}
+  grpo: {prefix: [grpo, group relative], exact: []}
+  rft: {prefix: [rft, rejection sampl, rejection fine, expert iteration], exact: []}
+  kto: {prefix: [kto], exact: []}
+  orpo: {prefix: [orpo], exact: []}
+  sft: {prefix: [sft, supervised fine, instruction tun], exact: []}
+  other: {prefix: [ppo, rloo, reinforce, simpo, distil, cpo, task arithmetic], exact: [ipo]}

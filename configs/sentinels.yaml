@@ -1,0 +1,64 @@
+# In-house sentinel LoRAs, trained by jobs/job_sentinels.py with AlignTune on benign data only.
+# The base is common.BASE_REPO at common.BASE_REVISION. Rows are drawn with `seed`, turned into a single
+# user/assistant turn, and formatted by the model's own chat template (AlignTune keeps the `messages`
+# column and TRL applies tokenizer.chat_template, so the shipped system preamble is part of every row).
+#
+# 250 steps x 4 rows x 2 accumulation = 2,000 rows = one epoch of a 2,000-row set; S1b repeats it 4 times.
+
+seed: 0
+
+lora:
+  r: 16
+  alpha: 32
+  dropout: 0.05
+  target_modules: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
+
+train:
+  learning_rate: 2.0e-4
+  per_device_batch_size: 4
+  gradient_accumulation_steps: 2
+  max_seq_length: 1024
+  warmup_ratio: 0.03
+  lr_scheduler: cosine
+  weight_decay: 0.0
+  logging_steps: 5
+  bf16: true
+
+sentinels:
+  S1a:
+    description: Alpaca-style general instruction SFT, short run
+    dataset: tatsu-lab/alpaca
+    config: null
+    split: train
+    license: CC-BY-NC-4.0
+    format: alpaca
+    n_rows: 2000
+    max_steps: 250
+  S1b:
+    description: Alpaca-style general instruction SFT, long run (same rows as S1a)
+    dataset: tatsu-lab/alpaca
+    config: null
+    split: train
+    license: CC-BY-NC-4.0
+    format: alpaca
+    n_rows: 2000
+    max_steps: 1000
+  S2:
+    description: grade-school maths word problems with worked answers
+    dataset: openai/gsm8k
+    config: main
+    split: train
+    license: MIT
+    format: gsm8k
+    n_rows: 2000
+    max_steps: 250
+  S3:
+    description: Yoruba prompts and completions written by native speakers
+    dataset: CohereLabs/aya_dataset
+    config: null
+    split: train
+    license: Apache-2.0
+    format: aya
+    filter: {language: Yoruba}
+    n_rows: 2000
+    max_steps: 250
