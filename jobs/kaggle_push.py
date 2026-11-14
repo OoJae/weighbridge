@@ -72,6 +72,9 @@ def bundle(message: str) -> None:
     shards = PRIVATE_DIR / "shards"
     if shards.is_dir():
         shutil.copytree(shards, target / "shards")
+    gguf = PRIVATE_DIR / "gguf"  # base-model GGUF generations from the Mac (q4_k_m robustness row), judged on Kaggle
+    if gguf.is_dir():
+        shutil.copytree(gguf, target / "gguf")
     digest = tree_digest(target)
     (target / BUNDLE_ID_FILE).write_text(digest + "\n")
     meta = {"title": "weighbridge-bundle", "id": DATASET, "licenses": [{"name": "other"}]}
