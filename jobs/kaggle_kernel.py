@@ -180,6 +180,9 @@ def run_queue(gpu: str, jobs: list[dict], env: dict, subs: dict, report: dict) -
 def main() -> None:
     for d in (OUT, LOGS, PRIVATE):
         d.mkdir(parents=True, exist_ok=True)
+    if PLAN.get("pip_uninstall"):  # e.g. Kaggle's torchao 0.10, which PEFT 0.21 refuses to load adapters next to
+        log(f"pip uninstall {PLAN['pip_uninstall']}")
+        subprocess.run([sys.executable, "-m", "pip", "uninstall", "-y", *PLAN["pip_uninstall"]], check=False)
     pip_install(PLAN.get("pip", []))
     pip_install(PLAN.get("pip_optional", []), required=False)
     log(f"python {sys.version.split()[0]}")
