@@ -8,18 +8,27 @@
 #   "pyyaml>=6",
 # ]
 # ///
-"""HF Jobs entry point: train the in-house sentinel LoRAs of configs/sentinels.yaml with AlignTune.
+"""Train the in-house sentinel LoRAs of configs/sentinels.yaml with AlignTune (HF Jobs or Kaggle).
 
 For each requested sentinel: draw its rows with the configured seed, write them as single-turn `messages`
 JSONL, and train a LoRA on CohereLabs/tiny-aya-global at common.BASE_REVISION through AlignTune's
 `create_sft_trainer(backend="trl")`. Since AlignTune 0.1.34 a `messages` column reaches TRL unchanged, so
-TRL formats every row with the model's own chat template. The adapter, its loss curve, the training rows
-and a metadata file are uploaded to the PRIVATE model repo `<out-repo-prefix>-<id>` (lower case); the team
-makes it public after checking it. A sentinel whose repo already holds an adapter is skipped, so a
-relaunch resumes.
+TRL formats every row with the model's own chat template. Each sentinel keeps its adapter, loss curve,
+training rows and a metadata file, either
 
-Launch through jobs/launch.py (needs weighbridge and jobs/ on PYTHONPATH, which the launcher sets):
+- uploaded to the PRIVATE model repo `<out-repo-prefix>-<id>` (lower case), which the team makes public after
+  checking it, or
+- with `--out-dir`, copied to `<out-dir>/<id>` and not uploaded (Kaggle, where there is no Hub token).
+
+A sentinel that already has an adapter at its destination is skipped, so a relaunch resumes.
+
+Precision follows the GPU: bfloat16 on GPUs with native support (compute capability 8.0 or newer), float16
+mixed precision on older ones such as the T4 (the LoRA weights stay in float32), float32 on the CPU.
+
+HF Jobs, through jobs/launch.py (which puts weighbridge and jobs/ on PYTHONPATH):
   .venv/bin/python jobs/launch.py run sentinels -- --out-repo-prefix <you>/weighbridge-sentinel --only S1a S2
+Kaggle, from a plan (jobs/kaggle_kernel.py fills in the paths):
+  python {BUNDLE}/jobs/job_sentinels.py --base-model {MODEL} --out-dir {OUT}/sentinels --only S2
 """
 
 from __future__ import annotations
@@ -28,6 +37,7 @@ import argparse
 import gc
 import json
 import logging
+import shutil
 from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass, field
 from importlib.metadata import version
@@ -35,9 +45,23 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import yaml
+from common_job import (
+    Timer,
+    gpu_memory,
+    hub_api,
+    job_context,
+    list_uploaded,
+    setup_logging,
+    upload_outputs,
+)
 
-from common_job import Timer, gpu_memory, hub_api, job_context, list_uploaded, setup_logging, upload_outputs
-from weighbridge.common import BASE_REPO, BASE_REVISION, REPO_ROOT, TARGET_MODULES, ensure_dir
+from weighbridge.common import (
+    BASE_REPO,
+    BASE_REVISION,
+    REPO_ROOT,
+    TARGET_MODULES,
+    ensure_dir,
+)
 
 if TYPE_CHECKING:
     from datasets import Dataset
@@ -188,12 +212,35 @@ def write_jsonl(rows: Sequence[dict[str, Any]], path: Path) -> Path:
 
 # ---- training ------------------------------------------------------------------------------------
 
+def resolve_precision(prefer_bf16: bool, capability: tuple[int, int] | None) -> str:
+    """The training precision for this machine: "bf16", "fp16" or "fp32".
+
+    `capability` is the CUDA compute capability, or None without a GPU. bfloat16 needs 8.0 or newer; the
+    check uses the capability because torch.cuda.is_bf16_supported() is also True on a T4, where bfloat16
+    is only emulated (and AlignTune's own "auto" relies on that call). Older GPUs get float16 mixed
+    precision instead. Without `prefer_bf16`, or without a GPU, training is in float32.
+    """
+    if capability is None or not prefer_bf16:
+        return "fp32"
+    return "bf16" if capability[0] >= 8 else "fp16"
+
+
+def gpu_capability() -> tuple[int, int] | None:
+    """The CUDA compute capability of the current GPU, or None when there is none."""
+    import torch
+
+    return tuple(torch.cuda.get_device_capability()) if torch.cuda.is_available() else None
+
+
 def aligntune_kwargs(cfg: SentinelConfig, spec: SentinelSpec, model_path: Path, data_path: Path,
-                     out_dir: Path) -> dict[str, Any]:
+                     out_dir: Path, precision: str) -> dict[str, Any]:
     """Keyword arguments for `aligntune.core.backend_factory.create_sft_trainer`.
 
     The model is a local snapshot of the pinned base revision (AlignTune takes no revision argument).
-    Evaluation and intermediate checkpoints are off: only the final adapter is kept.
+    `precision` sets both the dtype the base is loaded in and the Trainer's mixed-precision flag; PEFT keeps
+    the LoRA weights in float32 either way. Gradient checkpointing is on: the 262k-token vocabulary makes
+    the logits the largest activation. Evaluation and intermediate checkpoints are off: only the final
+    adapter is kept.
     """
     t, lora = cfg.train, cfg.lora
     return {
@@ -203,7 +250,8 @@ def aligntune_kwargs(cfg: SentinelConfig, spec: SentinelSpec, model_path: Path, 
         "batch_size": t.per_device_batch_size, "gradient_accumulation_steps": t.gradient_accumulation_steps,
         "learning_rate": t.learning_rate, "max_seq_length": t.max_seq_length, "warmup_ratio": t.warmup_ratio,
         "lr_scheduler": t.lr_scheduler, "weight_decay": t.weight_decay, "logging_steps": t.logging_steps,
-        "precision": "bf16" if t.bf16 else "fp32", "bf16": t.bf16,
+        "precision": precision, "bf16": precision == "bf16", "fp16": precision == "fp16",
+        "gradient_checkpointing": True, "use_gradient_checkpointing": True,
         "use_peft": True, "lora_r": lora.r, "lora_alpha": lora.alpha, "lora_dropout": lora.dropout,
         "lora_target_modules": list(lora.target_modules),
         "seed": cfg.seed, "data_seed": cfg.seed, "split_seed": cfg.seed,
@@ -239,7 +287,10 @@ def train_sentinel(cfg: SentinelConfig, spec: SentinelSpec, model_path: Path, wo
     out_dir = ensure_dir(work_dir / spec.id)
     rows, n_available = select_rows(load_dataset(spec.dataset, spec.config, split=spec.split), spec, cfg.seed)
     data_path = write_jsonl(rows, out_dir / "train_rows.jsonl")
-    trainer = create_sft_trainer(**aligntune_kwargs(cfg, spec, model_path, data_path, out_dir))
+    capability = gpu_capability()
+    precision = resolve_precision(cfg.train.bf16, capability)
+    log.info("%s: training in %s (GPU compute capability %s)", spec.id, precision, capability)
+    trainer = create_sft_trainer(**aligntune_kwargs(cfg, spec, model_path, data_path, out_dir, precision))
     with Timer(f"{spec.id} training") as timer:
         result = trainer.train()
     curve = loss_curve(trainer.trainer.state.log_history)
@@ -248,8 +299,9 @@ def train_sentinel(cfg: SentinelConfig, spec: SentinelSpec, model_path: Path, wo
     config_path.write_text(json.dumps(pin_adapter_config(json.loads(config_path.read_text()), cfg.lora), indent=2))
     meta = {
         **asdict(spec), "seed": cfg.seed, "lora": asdict(cfg.lora), "train": asdict(cfg.train),
-        "base_repo": BASE_REPO, "base_revision": BASE_REVISION, "rows_passing_filter": n_available,
-        "rows_selected": len(rows), "rows_after_aligntune": len(trainer.dataset),
+        "base_repo": BASE_REPO, "base_revision": BASE_REVISION, "base_path": str(model_path),
+        "precision": precision, "gpu_capability": capability, "gradient_checkpointing": True,
+        "rows_passing_filter": n_available, "rows_selected": len(rows), "rows_after_aligntune": len(trainer.dataset),
         "global_step": result["steps"], "final_loss": curve[-1]["loss"] if curve else None,
         "mean_train_loss": result["final_loss"], "train_wall_s": round(timer.seconds, 1),
         "gpu_memory": gpu_memory(spec.id), "versions": _versions(), "job": job_context(),
@@ -276,17 +328,28 @@ def _free_gpu() -> None:
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     """Command-line arguments."""
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    p.add_argument("--out-repo-prefix", required=True,
-                   help="private model repos are <prefix>-<id>, e.g. me/wb-sentinel")
+    dest = p.add_mutually_exclusive_group(required=True)
+    dest.add_argument("--out-repo-prefix", help="upload to private model repos <prefix>-<id>, e.g. me/wb-sentinel")
+    dest.add_argument("--out-dir", type=Path, help="keep each sentinel in <out-dir>/<id> instead of uploading it")
+    p.add_argument("--base-model", type=Path,
+                   help="local copy of the pinned base (default: download it from the Hub, which needs a token)")
     p.add_argument("--only", nargs="+", help="sentinel ids to train (default: all in the config)")
     p.add_argument("--config", type=Path, default=CONFIG_PATH)
     p.add_argument("--work-dir", type=Path, default=Path("/tmp/weighbridge/sentinels"))
-    p.add_argument("--force", action="store_true", help="retrain even when the repo already holds an adapter")
+    p.add_argument("--force", action="store_true", help="retrain even when the destination already has an adapter")
     return p.parse_args(argv)
 
 
+def keep_local(work_dir: Path, dest: Path) -> Path:
+    """Copy a trained sentinel's published files from its work folder to `dest`; returns `dest`."""
+    ensure_dir(dest)
+    for name in UPLOAD_FILES:
+        shutil.copy2(work_dir / name, dest / name)
+    return dest
+
+
 def main(argv: Sequence[str] | None = None) -> None:
-    """Train every requested sentinel that is not uploaded yet, uploading each as soon as it is done."""
+    """Train every requested sentinel that has no adapter at its destination, saving each as soon as it is done."""
     setup_logging()
     args = parse_args(argv)
     cfg = load_sentinel_config(args.config)
@@ -294,19 +357,31 @@ def main(argv: Sequence[str] | None = None) -> None:
     unknown = sorted(set(ids) - set(cfg.sentinels))
     if unknown:
         raise SystemExit(f"unknown sentinels {unknown}; known: {sorted(cfg.sentinels)}")
-    api = hub_api()
-    todo = [sid for sid in ids
-            if args.force or ADAPTER_FILE not in list_uploaded(repo_for(args.out_repo_prefix, sid), "model", api=api)]
-    log.info("to train: %s (already uploaded: %s)", todo, sorted(set(ids) - set(todo)))
+    api = None if args.out_dir and args.base_model else hub_api()
+    if args.out_dir:
+        done = {sid for sid in ids if (args.out_dir / sid / ADAPTER_FILE).exists()}
+    else:
+        done = {sid for sid in ids
+                if ADAPTER_FILE in list_uploaded(repo_for(args.out_repo_prefix, sid), "model", api=api)}
+    todo = [sid for sid in ids if args.force or sid not in done]
+    log.info("to train: %s (already done: %s)", todo, sorted(set(ids) - set(todo)))
     if not todo:
         return
-    with Timer("base download"):
-        model_path = Path(api.snapshot_download(BASE_REPO, revision=BASE_REVISION))
+    if args.base_model:
+        model_path = args.base_model
+    else:
+        with Timer("base download"):
+            model_path = Path(api.snapshot_download(BASE_REPO, revision=BASE_REVISION))
     gpu_memory("start")
     for sid in todo:
         out_dir = train_sentinel(cfg, cfg.sentinels[sid], model_path, args.work_dir)
-        upload_outputs(out_dir, repo_for(args.out_repo_prefix, sid), repo_type="model", allow_patterns=UPLOAD_FILES,
-                       message=f"sentinel {sid} ({cfg.sentinels[sid].max_steps} steps, seed {cfg.seed})", api=api)
+        if args.out_dir:
+            log.info("%s saved to %s", sid, keep_local(out_dir, args.out_dir / sid))
+        else:
+            upload_outputs(out_dir, repo_for(args.out_repo_prefix, sid), repo_type="model",
+                           allow_patterns=UPLOAD_FILES,
+                           message=f"sentinel {sid} ({cfg.sentinels[sid].max_steps} steps, seed {cfg.seed})",
+                           api=api)
 
 
 if __name__ == "__main__":

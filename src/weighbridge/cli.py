@@ -97,7 +97,8 @@ def cmd_analyze(args: argparse.Namespace) -> None:
     results, frame = analysis.analyze(
         pd.read_csv(args.scores), read_rows(args.t1), read_rows(args.labels), load_manifest(args.manifest),
         confirmatory, panel_ids(T1_PANEL, args.panels_dir, "harmful"), panel_ids(Y2_PANEL, args.panels_dir),
-        random=random, n_boot=args.n_boot, seed=args.seed, n_splits=args.n_splits)
+        random=random, n_boot=args.n_boot, seed=args.seed, n_splits=args.n_splits,
+        spot_labels=read_rows(args.spot_labels) if args.spot_labels else None)
     out = ensure_dir(args.out_dir)
     (out / "results.json").write_text(json.dumps(results, indent=1, default=_json_default) + "\n", encoding="utf-8")
     (out / "results.md").write_text(analysis.render_markdown(results) + "\n", encoding="utf-8")
@@ -170,6 +171,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--t1", type=Path, nargs="+", required=True, help="T1 JSONL files or folders")
     p.add_argument("--labels", type=Path, nargs="+", required=True, help="judge-label JSONL files or folders")
     p.add_argument("--random", type=Path, help="random-direction drifts written by `score --random`")
+    p.add_argument("--spot-labels", type=Path, nargs="+", help="judge labels of the spot-check runs (PREREG 10)")
     p.add_argument("--manifest", type=Path, default=PRIVATE_DIR / "manifest.jsonl")
     p.add_argument("--confirmatory", type=Path, default=PRIVATE_DIR / "confirmatory_set.json")
     p.add_argument("--panels-dir", type=Path, default=DATA_DIR / "panels")

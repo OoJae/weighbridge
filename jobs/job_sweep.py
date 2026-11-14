@@ -85,14 +85,20 @@ def load_panels(paths: Sequence[str]) -> list[dict]:
 
 
 def adapter_fetcher(dest_root: Path) -> Fetch:
-    """A memoised downloader: manifest row -> local adapter folder at the row's pinned SHA."""
+    """A memoised downloader: manifest row -> local adapter folder at the row's pinned SHA.
+
+    A row with ``local_path`` (our own sentinels and their repaired variants) is used where it is, never downloaded.
+    """
     from weighbridge.hub import download_adapter
 
     cache: dict[str, Path] = {}
 
     def fetch(row: dict) -> Path:
         if row["alias"] not in cache:
-            cache[row["alias"]] = Path(download_adapter(row, dest_root / row["alias"]))
+            if row.get("local_path"):
+                cache[row["alias"]] = Path(row["local_path"])
+            else:
+                cache[row["alias"]] = Path(download_adapter(row, dest_root / row["alias"]))
         return cache[row["alias"]]
 
     return fetch

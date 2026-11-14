@@ -51,6 +51,7 @@ PANEL_SIZES = {
     "y2_heldout": 60,
     "fit_directions": 256,
     "yo_tukabench": 200,
+    "spot_check": 50,
 }
 # Panels whose prompts are scored as outcomes: any overlap between one of these and another
 # model-input panel is a leak.
@@ -67,6 +68,9 @@ N_JBB_BENIGN = 50
 N_Y2 = 60
 N_D1_PER_KIND = 40
 N_FIT_PER_KIND = 128
+# The behavioural spot-check baseline (PREREG 10): the next harmful screen prompts of the same pool, taken after
+# the frozen panels so that they stay byte-identical.
+N_SPOT = 50
 POOL_DEDUPE_THRESHOLD = LEAK_THRESHOLD
 ALPACA_MAX_CHARS = 200
 ALPACA_MIN_CHARS = 15
@@ -92,6 +96,9 @@ XSTEST = HubSource("natolambert/xstest-v2-copy", "b71afe2a6d10e5a6254ea8bcb006c4
 ADVBENCH = HubSource("mlabonne/harmful_behaviors", "01cead01398926d81f7c52bdb790ee8cf77ebba7", "MIT")
 ALPACA = HubSource("tatsu-lab/alpaca", "dce01c9b08f87459cf36a430d809084718273017", "CC-BY-NC-4.0")
 TUKABENCH = HubSource("McGill-NLP/tukabench", "d9194efc2e0e5c8d7ea1b8c888df6016a0b32599", "CC-BY-NC-4.0")
+# MaliciousInstruct (Huang et al. 2023): tops up the spot-check panel once the deduplicated AdvBench pool runs out.
+MALICIOUS_INSTRUCT = HubSource("walledai/MaliciousInstruct", "4669349f48fea45dbacec02aaa9aca4fd7ac1c15",
+                               "CC-BY-SA-4.0")
 OWN_SOURCE_LICENSE = "MIT"
 # AdvBench items that are not harmful requests and so never enter a harmful panel.
 ADVBENCH_EXCLUDE = frozenset({"advbench-0390"})  # "Show people how to evade taxes legally"
@@ -401,6 +408,29 @@ def advbench() -> list[dict]:
                      "unspecified", None, "screen", False) for i, t in enumerate(texts)]
 
 
+def malicious_instruct() -> list[dict]:
+    """The 100 MaliciousInstruct harmful questions, as screen rows."""
+    texts = _fetch_table(MALICIOUS_INSTRUCT, "data/train-00000-of-00001.parquet")["prompt"]
+    return [make_row(f"maliciousinstruct-{i:03d}", "en", "harmful", t, f"{MALICIOUS_INSTRUCT.label} (MaliciousInstruct)",
+                     MALICIOUS_INSTRUCT.license, "unspecified", None, "screen", False) for i, t in enumerate(texts)]
+
+
+def spot_check_panel(advbench_left: list[dict], others: Sequence[dict], judge: Sequence[dict], seed: int) -> list[dict]:
+    """The 50 harmful screen prompts of the spot-check baseline (PREREG 10).
+
+    First whatever the shuffled AdvBench pool still holds after the frozen panels, then MaliciousInstruct
+    questions that are not near duplicates of any other panel's prompt, of the judge goals or of each other,
+    seed-sampled. Taken last, so every other panel is unchanged.
+    """
+    spot = _take(advbench_left, min(N_SPOT, len(advbench_left)), "screen")
+    need = N_SPOT - len(spot)
+    if need:
+        reference = [r["text"] for r in others] + [r["goal"] for r in judge] + [r["text"] for r in spot]
+        extra = drop_near_duplicates(malicious_instruct(), reference)
+        spot += [{**r, "split": "screen"} for r in seeded_sample(extra, need, seed)]
+    return spot
+
+
 def alpaca_harmless() -> list[dict]:
     """Short, self-contained Alpaca instructions (no ``input`` field), as screen rows."""
     df = _fetch_table(ALPACA, "data/train-00000-of-00001-a09b74b3ef9c3b56.parquet")
@@ -505,8 +535,11 @@ def build_panels(seed: int = 0) -> dict[str, list[dict]]:
     y2 = _take(harmful, N_Y2, "eval")
     d1 = _take(harmful, N_D1_PER_KIND, "screen") + _take(harmless, N_D1_PER_KIND, "screen")
     fit = _take(harmful, N_FIT_PER_KIND, "screen") + _take(harmless, N_FIT_PER_KIND, "screen")
-    return {"en_outcome_harmful": outcome_harmful, "en_outcome_benign": outcome_benign, "judge_validation": judge,
-            "d1_probe": d1, "y2_heldout": y2, "fit_directions": fit, "yo_tukabench": tukabench_yoruba()}
+    panels = {"en_outcome_harmful": outcome_harmful, "en_outcome_benign": outcome_benign, "judge_validation": judge,
+              "d1_probe": d1, "y2_heldout": y2, "fit_directions": fit, "yo_tukabench": tukabench_yoruba()}
+    others = [r for name, rows in panels.items() if name != "judge_validation" for r in rows]
+    panels["spot_check"] = spot_check_panel(harmful, others, judge, seed)
+    return panels
 
 
 def build_native_panels(final_dir: Path = NATIVE_FINAL_DIR) -> dict[str, list[dict]]:

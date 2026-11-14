@@ -8,7 +8,7 @@ import pytest
 
 from weighbridge import prompts as P
 
-ALLOWED_LICENSES = {"MIT", "CC-BY-4.0", "CC-BY-NC-4.0"}
+ALLOWED_LICENSES = {"MIT", "CC-BY-4.0", "CC-BY-NC-4.0", "CC-BY-SA-4.0"}  # SA: MaliciousInstruct (spot-check)
 
 
 @pytest.fixture(scope="module")

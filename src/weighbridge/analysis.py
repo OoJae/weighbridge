@@ -305,7 +305,7 @@ def weight_exclusions(df: pd.DataFrame) -> pd.Series:
 def analyze(scores: pd.DataFrame, t1_rows: Sequence[dict], label_rows: Sequence[dict],
             manifest_rows: Sequence[dict], confirmatory: Iterable[str], d1_ids: Iterable[str],
             y2_ids: Iterable[str], random: pd.DataFrame | None = None, n_boot: int = 10_000, seed: int = 0,
-            n_splits: int = 100) -> tuple[dict[str, Any], pd.DataFrame]:
+            n_splits: int = 100, spot_labels: Sequence[dict] | None = None) -> tuple[dict[str, Any], pd.DataFrame]:
     """Every pre-registered analysis. Returns (aggregate results, private per-adapter frame)."""
     meta = pd.DataFrame([{"alias": r["alias"], CLUSTER: r["author"], "declared_intent": r["declared_intent"],
                           "created_at": r.get("created_at") or ""}
@@ -318,7 +318,10 @@ def analyze(scores: pd.DataFrame, t1_rows: Sequence[dict], label_rows: Sequence[
     df = df[~excluded].reset_index(drop=True)
     outcomes = outcomes[outcomes["alias"].isin(df["alias"])]
     chosen = set(confirmatory)
+    if spot_labels is not None and len(spot_labels):
+        df = df.merge(spot_check_scores(pd.DataFrame(spot_labels)), on="alias", how="left")
     conf = df[df["alias"].isin(chosen)].reset_index(drop=True)
+    conf = add_fitted_baselines(conf, metadata_features(manifest_rows))
     hypotheses = hypothesis_tests(conf, n_boot, seed)
     columns = score_columns(df)
     task = conf[conf["declared_intent"] == TASK]
@@ -342,6 +345,72 @@ def analyze(scores: pd.DataFrame, t1_rows: Sequence[dict], label_rows: Sequence[
         results["random_direction_bar"] = random_direction_bar(conf, random)
     return results, df
 
+
+
+# ---- Fitted and behavioural baselines (PREREG 10) ------------------------------------------------
+
+RIDGE_ALPHAS = (0.01, 0.1, 1.0, 10.0, 100.0, 1000.0)
+METHODS = ("sft", "dpo", "grpo", "rft", "other", "unknown")
+
+
+def metadata_features(manifest_rows: Sequence[dict]) -> pd.DataFrame:
+    """Configuration metadata per adapter: rank, alpha, scaling, rsLoRA, number of target modules, attention and
+    MLP coverage, log size and training method (one-hot)."""
+    rows = []
+    for r in manifest_rows:
+        targets = set(r.get("target_modules") or [])
+        rows.append({"alias": r["alias"], "meta_rank": float(r.get("rank") or 0), "meta_alpha": float(r.get("alpha") or 0),
+                     "meta_scaling": float(r.get("scaling") or 0), "meta_rslora": float(bool(r.get("use_rslora"))),
+                     "meta_n_targets": float(len(targets)),
+                     "meta_attn": float(bool(targets & {"q_proj", "k_proj", "v_proj", "o_proj"})),
+                     "meta_mlp": float(bool(targets & {"gate_proj", "up_proj", "down_proj"})),
+                     "meta_log_bytes": math.log1p(float(r.get("weight_bytes") or 0)),
+                     **{f"method_{m}": float((r.get("training_method") or "unknown") == m) for m in METHODS}})
+    return pd.DataFrame(rows)
+
+
+def ridge_loao(df: pd.DataFrame, features: Sequence[str], target: str = "y", group: str = CLUSTER) -> pd.Series:
+    """Out-of-fold ridge predictions of `target`, leaving one author out at a time.
+
+    Features are standardised on each training fold; the penalty is chosen on the training fold alone by
+    efficient leave-one-out (RidgeCV). Authors with all their adapters held out are predicted from the rest.
+    """
+    from sklearn.linear_model import RidgeCV
+    from sklearn.pipeline import make_pipeline
+    from sklearn.preprocessing import StandardScaler
+
+    X = df[list(features)].astype(float).fillna(0.0).to_numpy()
+    y = df[target].astype(float).to_numpy()
+    groups = df[group].to_numpy()
+    pred = np.full(len(df), np.nan)
+    for g in pd.unique(groups):
+        test = groups == g
+        train = ~test & ~np.isnan(y)
+        if train.sum() < 3:
+            continue
+        model = make_pipeline(StandardScaler(), RidgeCV(alphas=RIDGE_ALPHAS))
+        model.fit(X[train], y[train])
+        pred[test] = model.predict(X[test])
+    return pd.Series(pred, index=df.index)
+
+
+def add_fitted_baselines(df: pd.DataFrame, meta_features: pd.DataFrame) -> pd.DataFrame:
+    """Add ``ridge_meta`` (metadata) and ``ridge_spectral`` (spectral features plus training method) as
+    leave-one-author-out predictions of Y, fitted within the frame given (PREREG 10)."""
+    df = df.merge(meta_features, on="alias", how="left")
+    meta_cols = [c for c in meta_features.columns if c != "alias"]
+    spec_cols = [c for c in df.columns if c.startswith("spec_")] + [c for c in meta_cols if c.startswith("method_")]
+    df = df.assign(ridge_meta=ridge_loao(df, meta_cols), ridge_spectral=ridge_loao(df, spec_cols) if spec_cols
+                   else np.nan)
+    return df.drop(columns=meta_cols)
+
+
+def spot_check_scores(spot_labels: pd.DataFrame) -> pd.DataFrame:
+    """The behavioural spot-check baseline: harmful-compliance change on the 50-prompt panel (English, shipped)."""
+    table = outcome_table(spot_labels)
+    lang, condition = PRIMARY
+    table = table[(table["lang"] == lang) & (table["condition"] == condition)]
+    return table[["alias", "y"]].rename(columns={"y": "spot_check"})
 
 # ---- Markdown ----------------------------------------------------------------------------------
 

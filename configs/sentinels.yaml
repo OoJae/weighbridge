@@ -3,7 +3,10 @@
 # user/assistant turn, and formatted by the model's own chat template (AlignTune keeps the `messages`
 # column and TRL applies tokenizer.chat_template, so the shipped system preamble is part of every row).
 #
-# 250 steps x 4 rows x 2 accumulation = 2,000 rows = one epoch of a 2,000-row set; S1b repeats it 4 times.
+# 250 steps x 1 row x 8 accumulation = 2,000 rows = one epoch of a 2,000-row set; S1b repeats it 4 times.
+# (Micro-batch 1 x 8 rather than 4 x 2, the same effective batch, so a 16 GB T4 holds the 262k-vocabulary logits.)
+# `bf16: true` means bfloat16 where the GPU has it natively; older GPUs such as the T4 train with float16 mixed
+# precision instead (jobs/job_sentinels.py resolve_precision), and every sentinel records the precision it used.
 
 seed: 0
 
@@ -15,8 +18,8 @@ lora:
 
 train:
   learning_rate: 2.0e-4
-  per_device_batch_size: 4
-  gradient_accumulation_steps: 2
+  per_device_batch_size: 1
+  gradient_accumulation_steps: 8
   max_seq_length: 1024
   warmup_ratio: 0.03
   lr_scheduler: cosine

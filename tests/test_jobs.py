@@ -323,13 +323,46 @@ def test_select_rows_filters_seeds_and_uses_all_on_shortfall():
 
 def test_aligntune_kwargs(tmp_path):
     cfg = js.load_sentinel_config()
-    kw = js.aligntune_kwargs(cfg, cfg.sentinels["S1b"], tmp_path / "base", tmp_path / "rows.jsonl", tmp_path / "out")
+    kw = js.aligntune_kwargs(cfg, cfg.sentinels["S1b"], tmp_path / "base", tmp_path / "rows.jsonl", tmp_path / "out",
+                             "bf16")
     assert kw["backend"] == "trl" and kw["task_type"] == "sft" and kw["use_peft"] is True
     assert (kw["max_steps"], kw["lora_r"], kw["lora_alpha"], kw["seed"]) == (1000, 16, 32, 0)
     assert sorted(kw["lora_target_modules"]) == sorted(TARGET_MODULES)
-    assert kw["precision"] == "bf16" and kw["bf16"] is True and kw["learning_rate"] == pytest.approx(2e-4)
+    assert kw["precision"] == "bf16" and kw["bf16"] is True and kw["fp16"] is False
+    assert kw["learning_rate"] == pytest.approx(2e-4)
+    assert kw["batch_size"] * kw["gradient_accumulation_steps"] == 8
+    assert kw["gradient_checkpointing"] is True
     assert kw["eval_strategy"] == "no" and kw["save_strategy"] == "no"
     assert kw["dataset_name"].endswith("rows.jsonl")
+    t4 = js.aligntune_kwargs(cfg, cfg.sentinels["S2"], tmp_path / "base", tmp_path / "rows.jsonl", tmp_path / "out",
+                             "fp16")
+    assert t4["precision"] == "fp16" and t4["fp16"] is True and t4["bf16"] is False
+
+
+def test_resolve_precision():
+    assert js.resolve_precision(True, (8, 6)) == "bf16"  # A10G
+    assert js.resolve_precision(True, (7, 5)) == "fp16"  # T4: bf16 only emulated
+    assert js.resolve_precision(True, None) == "fp32"  # CPU
+    assert js.resolve_precision(False, (9, 0)) == "fp32"
+
+
+def test_sentinel_args_need_one_destination(tmp_path):
+    args = js.parse_args(["--out-dir", str(tmp_path), "--base-model", str(tmp_path / "m"), "--only", "S2"])
+    assert args.out_dir == tmp_path and args.out_repo_prefix is None and args.only == ["S2"]
+    with pytest.raises(SystemExit):
+        js.parse_args(["--only", "S2"])
+    with pytest.raises(SystemExit):
+        js.parse_args(["--out-dir", str(tmp_path), "--out-repo-prefix", "me/wb"])
+
+
+def test_keep_local_copies_published_files(tmp_path):
+    work = tmp_path / "work"
+    work.mkdir()
+    for name in js.UPLOAD_FILES:
+        (work / name).write_text(name)
+    (work / "optimizer.pt").write_text("not published")
+    dest = js.keep_local(work, tmp_path / "out" / "S2")
+    assert sorted(p.name for p in dest.iterdir()) == sorted(js.UPLOAD_FILES)
 
 
 def test_pin_adapter_config_and_loss_curve():

@@ -13,31 +13,46 @@ Face token ever reaches Kaggle; third-party adapters are public and download wit
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "src"))
-from weighbridge.common import PRIVATE_DIR  # noqa: E402
+from weighbridge.common import PRIVATE_DIR
 
 KAGGLE = shutil.which("kaggle") or str(Path.home() / ".local/bin/kaggle")
 # The Kaggle account that owns the private dataset and kernels; set KAGGLE_USERNAME in the environment.
 USER = os.environ.get("KAGGLE_USERNAME", "")
 DATASET = f"{USER}/weighbridge-bundle"
 MODEL_SOURCE = "cohere-labs/tiny-aya/transformers/global/1"
+BASE_SOURCE = "cohere-labs/tiny-aya/transformers/base/1"  # for the SafeLoRA danger deltas
 STAGE = PRIVATE_DIR / "kaggle"
 BUNDLE_PARTS = ("src", "jobs", "configs", "data/panels", "data/native/final", "pyproject.toml")
+BUNDLE_ID_FILE = "BUNDLE_ID"  # inside wb_bundle: a digest of the bundle's contents, checked by the kernel
+LAST_BUNDLE = STAGE / "bundle_id.txt"  # the digest of the last bundle uploaded from this Mac
 
 
 def run(cmd: list[str]) -> str:
-    out = subprocess.run(cmd, capture_output=True, text=True)
+    out = subprocess.run(cmd, capture_output=True, text=True, check=False)
     if out.returncode != 0:
         raise SystemExit(f"{' '.join(cmd[:4])} failed:\n{out.stdout}\n{out.stderr}")
     return out.stdout
+
+
+def tree_digest(root: Path) -> str:
+    """A short SHA-256 over every file's relative path and bytes (the BUNDLE_ID file itself excluded)."""
+    h = hashlib.sha256()
+    for p in sorted(root.rglob("*")):
+        if p.is_file() and p.name != BUNDLE_ID_FILE:
+            h.update(p.relative_to(root).as_posix().encode() + b"\0")
+            h.update(p.read_bytes())
+    return h.hexdigest()[:16]
 
 
 def bundle(message: str) -> None:
@@ -57,18 +72,41 @@ def bundle(message: str) -> None:
     shards = PRIVATE_DIR / "shards"
     if shards.is_dir():
         shutil.copytree(shards, target / "shards")
+    digest = tree_digest(target)
+    (target / BUNDLE_ID_FILE).write_text(digest + "\n")
     meta = {"title": "weighbridge-bundle", "id": DATASET, "licenses": [{"name": "other"}]}
     (root / "dataset-metadata.json").write_text(json.dumps(meta, indent=2))
-    exists = subprocess.run([KAGGLE, "datasets", "status", DATASET], capture_output=True, text=True).returncode == 0
+    exists = subprocess.run([KAGGLE, "datasets", "status", DATASET], capture_output=True, text=True, check=False).returncode == 0
     if exists:
-        print(run([KAGGLE, "datasets", "version", "-p", str(root), "-m", message, "-r", "zip"]))
+        print(run([KAGGLE, "datasets", "version", "-p", str(root), "-m", f"{message} [{digest}]", "-r", "zip"]))
     else:
         print(run([KAGGLE, "datasets", "create", "-p", str(root), "-r", "zip"]))  # private unless --public
+    LAST_BUNDLE.write_text(digest + "\n")
+    print(f"bundle {digest}")
+
+
+def wait_dataset_ready(timeout_s: int = 900) -> None:
+    """Block until the newest dataset version has finished processing, so a push attaches it."""
+    t0 = time.time()
+    while time.time() - t0 < timeout_s:
+        out = subprocess.run([KAGGLE, "datasets", "status", DATASET], capture_output=True, text=True, check=False)
+        if out.returncode == 0 and "ready" in out.stdout.lower():
+            return
+        time.sleep(15)
+    raise SystemExit(f"dataset {DATASET} not ready after {timeout_s}s")
 
 
 def push(plan_path: Path) -> str:
-    """Write a kernel folder for the plan and push it; returns the kernel slug."""
+    """Write a kernel folder for the plan and push it; returns the kernel slug.
+
+    The plan is stamped with the last uploaded bundle's digest; the kernel refuses to run on another bundle.
+    `kernel_sources` in the plan attaches earlier kernels' outputs as inputs (found again at run time through
+    the plan's `find` patterns).
+    """
     plan = json.loads(plan_path.read_text())
+    if LAST_BUNDLE.exists():
+        plan["bundle_id"] = LAST_BUNDLE.read_text().strip()
+    wait_dataset_ready()
     slug = f"{USER}/wb-{plan['name']}"
     kdir = STAGE / "kernels" / plan["name"]
     kdir.mkdir(parents=True, exist_ok=True)
@@ -77,11 +115,17 @@ def push(plan_path: Path) -> str:
     meta = {
         "id": slug, "title": f"wb-{plan['name']}", "code_file": "run.py", "language": "python",
         "kernel_type": "script", "is_private": True, "enable_gpu": True, "enable_internet": True,
-        "machine_shape": "NvidiaTeslaT4", "dataset_sources": [DATASET], "model_sources": [MODEL_SOURCE],
-        "competition_sources": [], "kernel_sources": [],
+        "machine_shape": "NvidiaTeslaT4", "dataset_sources": [DATASET],
+        "model_sources": plan.get("model_sources", [MODEL_SOURCE]),
+        "competition_sources": [], "kernel_sources": plan.get("kernel_sources", []),
     }
     (kdir / "kernel-metadata.json").write_text(json.dumps(meta, indent=2))
-    print(run([KAGGLE, "kernels", "push", "-p", str(kdir)]))
+    reply = run([KAGGLE, "kernels", "push", "-p", str(kdir)])
+    print(reply)
+    if "error" in reply.lower() or "successfully pushed" not in reply.lower():
+        # The CLI exits 0 on refusals such as "Maximum batch GPU session count of 2 reached."
+        raise SystemExit(f"push of {slug} refused: {reply.strip()}")
+    print(f"pushed {slug} (bundle {plan.get('bundle_id', 'unchecked')})")
     return slug
 
 

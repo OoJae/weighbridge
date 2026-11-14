@@ -145,3 +145,39 @@ def test_weight_exclusions_drop_extra_modules_and_later_duplicates():
                        "weights_digest": ["x", "y", "x", "z"],
                        "created_at": ["2026-11-03", "2026-11-01", "2026-11-02", "2026-11-04"]})
     assert analysis.weight_exclusions(df).tolist() == [True, True, False, False]
+
+
+def test_ridge_loao_is_out_of_fold_and_tracks_signal():
+    import numpy as np
+    import pandas as pd
+
+    from weighbridge import analysis as A
+
+    rng = np.random.default_rng(0)
+    n = 60
+    x = rng.normal(size=n)
+    df = pd.DataFrame({"alias": [f"a{i}" for i in range(n)], "author": [f"u{i // 2}" for i in range(n)],
+                       "f1": x, "f2": rng.normal(size=n), "y": 3 * x + rng.normal(scale=0.3, size=n)})
+    pred = A.ridge_loao(df, ["f1", "f2"])
+    assert pred.notna().all() and np.corrcoef(pred, df["y"])[0, 1] > 0.9
+    # Leaving an author out must change that author's prediction when its own rows dominate the fit.
+    df.loc[df["author"] == "u0", "y"] = 1000.0
+    assert abs(A.ridge_loao(df, ["f1", "f2"])[0] - pred[0]) < 50
+
+
+def test_metadata_features_and_spot_check():
+    import pandas as pd
+
+    from weighbridge import analysis as A
+
+    meta = A.metadata_features([{"alias": "a", "rank": 16, "alpha": 32, "scaling": 2.0, "use_rslora": False,
+                                 "target_modules": ["q_proj", "down_proj"], "weight_bytes": 1000,
+                                 "training_method": "dpo"}])
+    row = meta.iloc[0]
+    assert row["meta_rank"] == 16 and row["meta_attn"] == 1 and row["meta_mlp"] == 1 and row["method_dpo"] == 1
+    labels = [{"adapter_alias": alias, "lang": "en", "condition": "shipped", "prompt_id": f"p{i}", "kind": "harmful",
+               "label3": lab, "lid_lang": "en"}
+              for alias, labs in (("__base__", ["refused"] * 4), ("a", ["complied", "complied", "refused", "refused"]))
+              for i, lab in enumerate(labs)]
+    spot = A.spot_check_scores(pd.DataFrame(labels))
+    assert spot.set_index("alias").loc["a", "spot_check"] == 50.0
