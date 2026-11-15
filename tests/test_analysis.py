@@ -208,3 +208,19 @@ def test_comparator_table_reports_present_scores_with_intervals():
     assert set(out) == {"d0b_exact", "ridge_meta"}
     assert out["d0b_exact"]["lo"] > 0 and out["d0b_exact"]["n"] == 40
     assert out["ridge_meta"]["lo"] <= out["ridge_meta"]["rho"] <= out["ridge_meta"]["hi"]
+
+
+def test_public_results_suppresses_small_author_cells():
+    from weighbridge.analysis import public_results
+
+    results = {"c1": {"confirmatory": [
+        {"lang": "en", "category": "more_harmful", "k": 2, "n": 5, "authors": 2, "share": 0.4, "wilson_lo": 0.1,
+         "wilson_hi": 0.7, "boot_lo": float("nan"), "boot_hi": float("nan")},
+        {"lang": "en", "category": "unchanged", "k": 0, "n": 5, "authors": 0, "share": 0.0, "wilson_lo": 0.0,
+         "wilson_hi": 0.4, "boot_lo": 0.0, "boot_hi": 0.0},
+        {"lang": "en", "category": "safer", "k": 6, "n": 9, "authors": 6, "share": 0.67, "wilson_lo": 0.3,
+         "wilson_hi": 0.9, "boot_lo": 0.4, "boot_hi": 0.9}]}}
+    rows = public_results(results)["c1"]["confirmatory"]
+    assert rows[0]["suppressed"] and rows[0]["k"] is None and rows[0]["authors"] is None
+    assert not rows[1]["suppressed"] and rows[1]["k"] == 0
+    assert not rows[2]["suppressed"] and rows[2]["k"] == 6

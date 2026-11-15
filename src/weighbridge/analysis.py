@@ -12,6 +12,8 @@ authors behind it, and a per-adapter frame, which is private (it is keyed by ali
 
 from __future__ import annotations
 
+import json
+
 import math
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import Any
@@ -473,6 +475,43 @@ def _c1_cell(row: Mapping[str, Any]) -> str:
         return f"<{MIN_AUTHORS_PER_CELL} authors"
     interval = f"{100 * row['wilson_lo']:.0f}-{100 * row['wilson_hi']:.0f}"
     return f"{row['k']}/{row['n']} ({100 * row['share']:.0f}%, {interval})"
+
+
+C1_COUNT_FIELDS = ("k", "share", "wilson_lo", "wilson_hi", "boot_lo", "boot_hi")
+
+
+def public_results(results: Mapping[str, Any]) -> dict[str, Any]:
+    """The aggregate results as they may be published: C1 cells with a non-zero count from fewer than five authors
+    have their count, share and intervals removed (``suppressed: true``), as `_c1_cell` does for the tables.
+
+    Everything else in `results` is already aggregate (no adapter appears in it).
+    """
+    out = _no_nan(json.loads(json.dumps(results, default=_plain)))
+    for key in ("confirmatory", "all_included"):
+        for row in out.get("c1", {}).get(key, []):
+            suppressed = 0 < row["authors"] < MIN_AUTHORS_PER_CELL
+            row["suppressed"] = suppressed
+            if suppressed:
+                row.update({f: None for f in C1_COUNT_FIELDS} | {"authors": None})
+    return out
+
+
+def _no_nan(value: Any) -> Any:
+    """`value` with every float NaN replaced by None, so the file is strict JSON."""
+    if isinstance(value, float) and math.isnan(value):
+        return None
+    if isinstance(value, dict):
+        return {k: _no_nan(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_no_nan(v) for v in value]
+    return value
+
+
+def _plain(value: object) -> object:
+    """JSON for NumPy scalars."""
+    if hasattr(value, "item"):
+        return value.item()
+    raise TypeError(f"not JSON serialisable: {type(value).__name__}")
 
 
 def render_markdown(results: Mapping[str, Any]) -> str:

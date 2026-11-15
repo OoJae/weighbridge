@@ -111,6 +111,8 @@ def cmd_analyze(args: argparse.Namespace) -> None:
     out = ensure_dir(args.out_dir)
     (out / "results.json").write_text(json.dumps(results, indent=1, default=_json_default) + "\n", encoding="utf-8")
     (out / "results.md").write_text(analysis.render_markdown(results) + "\n", encoding="utf-8")
+    (out / "results_public.json").write_text(json.dumps(analysis.public_results(results), indent=1) + "\n",
+                                             encoding="utf-8")
     frame.to_csv(out / "adapters.csv", index=False)
     print(f"verdict: {results['verdict']} -> {out}")
 
