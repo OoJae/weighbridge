@@ -57,6 +57,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--work-dir", type=Path, default=Path("judge_out"))
     p.add_argument("--code-repo", help="dataset repo with this repository's tree, if weighbridge is not installed")
     p.add_argument("--batch-size", type=int, default=16)
+    p.add_argument("--shard", help="i/n: label only every n-th generation file starting at i (one GPU each)")
+    p.add_argument("--prior-labels", nargs="*", help="label files or folders from earlier sessions to skip")
     return p.parse_args(argv)
 
 
@@ -155,11 +157,17 @@ def main(argv: list[str] | None = None) -> None:
     ensure_weighbridge(args.code_repo, token)
 
     prompts = prompt_texts(args.panels, token)
-    out_path = args.work_dir / "labels" / f"{args.run_id}.jsonl"
+    index, count = (int(x) for x in args.shard.split("/")) if args.shard else (0, 1)
+    suffix = f".s{index}of{count}" if count > 1 else ""
+    out_path = args.work_dir / "labels" / f"{args.run_id}{suffix}.jsonl"
     out_path.parent.mkdir(parents=True, exist_ok=True)
     done = labelled_aliases(out_path)
+    for prior in args.prior_labels or []:  # labels from an earlier session: skip those adapters
+        for f in (sorted(Path(prior).glob("*.jsonl")) if Path(prior).is_dir() else [Path(prior)]):
+            done |= labelled_aliases(f)
     files = (local_generation_files(args.gen_dir) if args.gen_dir
              else generation_files(args.gen_repo, args.run_id, token))
+    files = files[index::count]  # with --shard i/n, every n-th file starting at i, so GPUs split the work
     for path in files:
         rows = [r for r in read_jsonl(path) if r["adapter_alias"] not in done]
         if rows:

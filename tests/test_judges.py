@@ -128,11 +128,16 @@ def test_lang_id_falls_back_with_warning(monkeypatch):
 
 
 class _FakeFastTextBinding:
-    def multilinePredict(self, lines, k, threshold, on_unicode_error):
+    """The single-line binding as both fasttext and fasttext-predict expose it: [(probability, label)]."""
+
+    def predict(self, text, k, threshold, on_unicode_error):
+        assert text.endswith("\n") and "\n" not in text[:-1]
         table = {"hello there": "__label__eng_Latn", "bawo ni": "__label__yor_Latn",
                  "how far": "__label__pcm_Latn"}
-        labels = [[table.get(line, "__label__fra_Latn")] for line in lines]
-        return labels, [[1.00002]] * len(lines)
+        return [(1.00002, table.get(text[:-1], "__label__fra_Latn"))]
+
+    def multilinePredict(self, lines, k, threshold, on_unicode_error):  # fasttext-predict: labels only
+        raise AssertionError("multilinePredict drops probabilities in fasttext-predict and must not be used")
 
 
 class _FakeFastText:

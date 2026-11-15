@@ -267,18 +267,22 @@ def _load_glotlid(revision: str) -> Any:
 def glotlid_predict(model: Any, texts: Sequence[str]) -> list[tuple[str, float]]:
     """Top-1 GlotLID label per text, mapped to en / yo / pcm / other; empty texts are ("other", 0.0).
 
-    Calls the C++ binding `model.f.multilinePredict` directly because `FastText.predict` builds its
-    result with `np.array(..., copy=False)`, which raises under NumPy 2.
+    Calls the C++ binding `model.f.predict` line by line, because `FastText.predict` builds its result with
+    `np.array(..., copy=False)`, which raises under NumPy 2.
     """
     lines = [" ".join(t.split()) for t in texts]
     nonempty = [i for i, line in enumerate(lines) if line]
     results: list[tuple[str, float]] = [("other", 0.0)] * len(lines)
     if not nonempty:
         return results
-    labels, probs = model.f.multilinePredict([lines[i] for i in nonempty], 1, 0.0, "strict")
-    for i, label, prob in zip(nonempty, labels, probs):
-        code = label[0].removeprefix("__label__")
-        results[i] = (GLOTLID_TO_LANG.get(code, "other"), float(np.clip(prob[0], 0.0, 1.0)))
+    for i in nonempty:
+        # The single-line binding returns [(probability, label)] in both fasttext and fasttext-predict; the
+        # latter's multilinePredict drops the probabilities, so it is not used.
+        preds = model.f.predict(lines[i] + "\n", 1, 0.0, "strict")
+        if preds:
+            prob, label = preds[0]
+            code = str(label).removeprefix("__label__")
+            results[i] = (GLOTLID_TO_LANG.get(code, "other"), float(np.clip(prob, 0.0, 1.0)))
     return results
 
 
