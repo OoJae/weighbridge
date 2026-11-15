@@ -59,7 +59,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--batch-size", type=int, default=16)
     p.add_argument("--shard", help="i/n: label only every n-th generation file starting at i (one GPU each)")
     p.add_argument("--prior-labels", nargs="*", help="label files or folders from earlier sessions to skip")
+    p.add_argument("--conditions", nargs="+",
+                   help="label only generations under these template conditions (give the run-id a matching name, "
+                        "since resuming is keyed by adapter)")
     return p.parse_args(argv)
+
+
+def select_rows(rows: list[dict[str, Any]], done: set[str], conditions: list[str] | None) -> list[dict[str, Any]]:
+    """Rows of adapters not yet labelled, restricted to `conditions` when given."""
+    return [r for r in rows if r["adapter_alias"] not in done and (not conditions or r["condition"] in conditions)]
 
 
 def ensure_weighbridge(code_repo: str | None, token: str | None) -> None:
@@ -169,7 +177,7 @@ def main(argv: list[str] | None = None) -> None:
              else generation_files(args.gen_repo, args.run_id, token))
     files = files[index::count]  # with --shard i/n, every n-th file starting at i, so GPUs split the work
     for path in files:
-        rows = [r for r in read_jsonl(path) if r["adapter_alias"] not in done]
+        rows = select_rows(read_jsonl(path), done, args.conditions)
         if rows:
             append_rows(out_path, label_file(rows, prompts, args.batch_size, args.backend))
             log.info("labelled %d generations from %s", len(rows), path.name)

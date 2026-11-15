@@ -457,3 +457,11 @@ def test_fetch_adapters_downloads_each_included_row(tmp_path, monkeypatch):
     monkeypatch.setattr(hub, "download_adapter", lambda row, dest: got.append((row["alias"], dest)) or dest)
     fetch_adapters.main(["--shards", str(shard), "--dest", str(tmp_path / "ad")])
     assert got == [("a1", tmp_path / "ad" / "a1"), ("a2", tmp_path / "ad" / "a2")]
+
+
+def test_judge_select_rows_filters_done_adapters_and_conditions():
+    import job_judge
+
+    rows = [{"adapter_alias": a, "condition": c} for a in ("x", "y") for c in ("shipped", "minimal")]
+    assert job_judge.select_rows(rows, {"x"}, None) == rows[2:]
+    assert job_judge.select_rows(rows, set(), ["shipped"]) == [rows[0], rows[2]]

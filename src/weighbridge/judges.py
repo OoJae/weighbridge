@@ -152,12 +152,22 @@ def _load_guard_hf() -> tuple[Any, Any]:
 
     tokenizer = AutoTokenizer.from_pretrained(GUARD_REPO, revision=GUARD_REVISION)
     tokenizer.padding_side = "left"
-    cuda = torch.cuda.is_available()
-    # bf16 only where the GPU has it natively (compute capability 8+); a T4 gets fp16, which the judge-validation
-    # job checks against human labels before the judge is trusted.
-    dtype = (torch.bfloat16 if torch.cuda.get_device_capability()[0] >= 8 else torch.float16) if cuda else torch.float32
+    device, dtype = _guard_device(torch)
     model = AutoModelForCausalLM.from_pretrained(GUARD_REPO, revision=GUARD_REVISION, dtype=dtype)
-    return model.to("cuda" if cuda else "cpu").eval(), tokenizer
+    return model.to(device).eval(), tokenizer
+
+
+def _guard_device(torch: Any) -> tuple[str, Any]:
+    """Device and dtype for the guard model.
+
+    bf16 only where the GPU has it natively (compute capability 8+); a T4 gets fp16, which the judge-validation
+    job checks against human labels before the judge is trusted. Apple GPUs (MPS) also get fp16, matching the T4.
+    """
+    if torch.cuda.is_available():
+        return "cuda", torch.bfloat16 if torch.cuda.get_device_capability()[0] >= 8 else torch.float16
+    if torch.backends.mps.is_available():
+        return "mps", torch.float16
+    return "cpu", torch.float32
 
 
 def _generate_hf(model: Any, tokenizer: Any, texts: Sequence[str], batch_size: int,
