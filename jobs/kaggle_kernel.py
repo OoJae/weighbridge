@@ -230,9 +230,12 @@ def main() -> None:
             report.setdefault("versions", {})[pkg] = version(pkg)
         except PackageNotFoundError:
             pass
-    smi = subprocess.run(["nvidia-smi", "--query-gpu=name,memory.total", "--format=csv,noheader"],
-                         capture_output=True, text=True, check=False)
-    report["gpus"] = smi.stdout.strip().splitlines() if smi.returncode == 0 else []
+    try:  # a CPU-only kernel has no nvidia-smi
+        smi = subprocess.run(["nvidia-smi", "--query-gpu=name,memory.total", "--format=csv,noheader"],
+                             capture_output=True, text=True, check=False)
+        report["gpus"] = smi.stdout.strip().splitlines() if smi.returncode == 0 else []
+    except FileNotFoundError:
+        report["gpus"] = []
     log(f"versions={report.get('versions')} gpus={report['gpus']}")
     for key, value in PLAN.get("env", {}).items():  # plan-level variables, e.g. the calibrated opener file
         env[key] = value.format(**subs)

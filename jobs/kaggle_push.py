@@ -117,11 +117,13 @@ def push(plan_path: Path) -> str:
     (kdir / "run.py").write_text(template.replace("__PLAN_JSON__", json.dumps(plan)))
     meta = {
         "id": slug, "title": f"wb-{plan['name']}", "code_file": "run.py", "language": "python",
-        "kernel_type": "script", "is_private": True, "enable_gpu": True, "enable_internet": True,
-        "machine_shape": plan.get("machine_shape", "NvidiaTeslaT4"), "dataset_sources": [DATASET],
+        "kernel_type": "script", "is_private": True, "enable_gpu": plan.get("enable_gpu", True), "enable_internet": True,
+        "dataset_sources": [DATASET],
         "model_sources": plan.get("model_sources", [MODEL_SOURCE]),
         "competition_sources": [], "kernel_sources": plan.get("kernel_sources", []),
     }
+    if meta["enable_gpu"]:  # a CPU-only kernel (no GPU quota used) takes no machine shape
+        meta["machine_shape"] = plan.get("machine_shape", "NvidiaTeslaT4")
     (kdir / "kernel-metadata.json").write_text(json.dumps(meta, indent=2))
     reply = run([KAGGLE, "kernels", "push", "-p", str(kdir)])
     print(reply)

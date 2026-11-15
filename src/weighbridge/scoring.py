@@ -15,9 +15,10 @@ harmful), so it can be correlated with the outcome Y directly.
 from __future__ import annotations
 
 import hashlib
+import logging
 import math
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -27,6 +28,8 @@ import torch
 from . import grad, lora, meters
 from .common import RESIDUAL_WRITERS
 from .lora import Adapter, Key
+
+log = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -208,12 +211,14 @@ def _adapter_bytes(adapter: Adapter) -> int:
 
 def score_folder(root: str | Path, art: ProbeArtifacts, danger: Mapping | None = None, n_random: int = 0,
                  seed: int = 0, chunk_bytes: int = RANDOM_CHUNK_BYTES,
-                 device: str | None = None) -> tuple[pd.DataFrame, pd.DataFrame | None]:
+                 device: str | None = None,
+                 on_row: Callable[[list[dict]], None] | None = None) -> tuple[pd.DataFrame, pd.DataFrame | None]:
     """Scores of every adapter under `root`, one row per alias; plus random-direction drifts when `n_random` > 0.
 
     The random-direction frame has one row per alias and columns r0 ... r{n-1}; direction j is the same
     direction for every adapter, so column j gives one draw of the null distribution of a rank correlation.
     Random directions are drawn once per chunk of adapters holding at most `chunk_bytes` of factors.
+    `on_row`, when given, is called with the score rows so far after each adapter (to save partial results).
     """
     import pandas as pd
 
@@ -230,6 +235,9 @@ def score_folder(root: str | Path, art: ProbeArtifacts, danger: Mapping | None =
     for alias, path in find_adapters(root):
         adapter = lora.load_adapter(path, name=alias)
         rows.append({"alias": alias, **score_adapter(adapter, art, danger)})
+        log.info("scored %d %s in %.1fs", len(rows), alias, rows[-1]["weights_seconds"])
+        if on_row:
+            on_row(rows)
         if n_random:
             if chunk and sum(_adapter_bytes(a) for _, a in chunk) + _adapter_bytes(adapter) > chunk_bytes:
                 flush()

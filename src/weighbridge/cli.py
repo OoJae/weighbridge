@@ -50,8 +50,14 @@ def cmd_score(args: argparse.Namespace) -> None:
     art = scoring.load_probe_artifacts(args.probe, args.lang, args.condition)
     danger = grad.load(args.danger) if args.danger else None
     device = args.device or ("cuda" if torch.cuda.is_available() else None)
-    scores, randoms = scoring.score_folder(args.adapters, art, danger, args.random, args.seed, device=device)
     ensure_dir(args.out.parent)
+    import pandas as pd
+
+    def save_partial(rows: list[dict]) -> None:  # a timeout keeps every adapter scored so far
+        pd.DataFrame(rows).to_csv(args.out, index=False)
+
+    scores, randoms = scoring.score_folder(args.adapters, art, danger, args.random, args.seed, device=device,
+                                           on_row=save_partial)
     scores.to_csv(args.out, index=False)
     if randoms is not None:
         randoms.to_csv(random_path(args.out), index=False)
