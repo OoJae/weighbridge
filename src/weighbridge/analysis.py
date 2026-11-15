@@ -30,6 +30,7 @@ from .stats import (
     partial_spearman,
     spearman,
     spearman_brown,
+    spearman_ci,
     wilson,
 )
 
@@ -172,6 +173,23 @@ def hypothesis_tests(df: pd.DataFrame, n_boot: int = 10_000, seed: int = 0) -> l
     for result, adjusted in zip(results, holm([r["p"] for r in results]), strict=True):
         result |= {"p_holm": adjusted, "passed": adjusted < ALPHA}
     return results
+
+
+COMPARATORS = ("d0b_exact", "d0b_sketch", "d0a", "d1", "d1p", "log_delta_norm", "ridge_meta", "ridge_spectral",
+               "safelora", "irrelevant", "spot_check")
+
+
+def comparator_table(df: pd.DataFrame, n_boot: int = 10_000, seed: int = 0) -> dict[str, dict[str, float]]:
+    """ρ with Y and an author-cluster 95% interval for every screen and baseline present (secondary, PREREG 10).
+
+    Fitted baselines (``ridge_*``) are leave-one-author-out predictions, so their ρ is out of sample.
+    """
+    out = {}
+    for c in COMPARATORS:
+        if c in df and df[c].notna().sum() >= 3:
+            rho, lo, hi = spearman_ci(df, c, "y", CLUSTER, n_boot, seed)
+            out[c] = {"rho": rho, "lo": lo, "hi": hi, "n": int(df[c].notna().sum())}
+    return out
 
 
 def verdict(h1: Mapping[str, Any], h3: Mapping[str, Any]) -> str:
@@ -354,7 +372,9 @@ def analyze(scores: pd.DataFrame, t1_rows: Sequence[dict], label_rows: Sequence[
         "d0a_zero_by_construction": int((conf["residual_writers"] == 0).sum()) if "residual_writers" in conf else None,
         "hypotheses": hypotheses, "verdict": verdict(hypotheses[0], hypotheses[2]),
         "noise_ceiling": noise_ceiling(labels, conf["alias"], n_splits),
-        "correlations": {"confirmatory": correlations(conf, columns), "all_included": correlations(df, columns)},
+        "correlations": {"confirmatory": correlations(conf, score_columns(conf)),
+                         "all_included": correlations(df, columns)},
+        "comparators": comparator_table(conf, n_boot, seed),
         "auroc": auroc_table(conf, columns, n_boot, seed),
         "linearity": linearity(t1, df.set_index("alias")["d0b"]),
         "c1": {"confirmatory": c1_table(outcomes[outcomes["alias"].isin(chosen)], meta, n_boot, seed)
@@ -472,6 +492,11 @@ def render_markdown(results: Mapping[str, Any]) -> str:
         lines += [f"## Random-direction bar (95th percentile of {bar['n_directions']} directions: "
                   f"{bar['null_p95']:.3f})", ""]
         lines += _md_table(["score", "rho", "passes"], [[s, v["rho"], v["passes"]] for s, v in bar["scores"].items()])
+    if results.get("comparators"):
+        lines += ["## Screens and baselines (confirmatory set, author-cluster 95% CI)", ""]
+        lines += _md_table(["score", "n", "rho with Y", "95% CI"],
+                           [[c, v["n"], v["rho"], f"{v['lo']:.3f} to {v['hi']:.3f}"]
+                            for c, v in results["comparators"].items()])
     lines += ["## Correlations (confirmatory set, exploratory)", ""]
     lines += _md_table(["score", "rho with Y", "rho with -Y2"],
                        [[c, v["y"], v["neg_y2"]] for c, v in results["correlations"]["confirmatory"].items()])

@@ -192,3 +192,19 @@ def test_one_base_copy_drops_repeated_base_rows_only():
     assert one_base_copy([base, other, dict(base)], LABEL_KEY) == [base, other]
     with pytest.raises(ValueError, match="duplicate"):
         one_base_copy([other, dict(other)], LABEL_KEY)
+
+
+def test_comparator_table_reports_present_scores_with_intervals():
+    import numpy as np
+    import pandas as pd
+
+    from weighbridge.analysis import CLUSTER, comparator_table
+
+    rng = np.random.default_rng(0)
+    y = rng.normal(size=40)
+    df = pd.DataFrame({"y": y, "d0b_exact": y + rng.normal(scale=0.5, size=40), "ridge_meta": rng.normal(size=40),
+                       CLUSTER: [f"a{i % 20}" for i in range(40)]})
+    out = comparator_table(df, n_boot=200, seed=0)
+    assert set(out) == {"d0b_exact", "ridge_meta"}
+    assert out["d0b_exact"]["lo"] > 0 and out["d0b_exact"]["n"] == 40
+    assert out["ridge_meta"]["lo"] <= out["ridge_meta"]["rho"] <= out["ridge_meta"]["hi"]
