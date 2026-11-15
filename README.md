@@ -194,13 +194,32 @@ Every cell covers at least 5 authors.
 
 ### Repair (C3)
 
-| Method | Drift recovered | Over-refusal change | KL to unrepaired | Task score |
-|---|---|---|---|---|
-| Gradient projection (k = [..]) | [..] | [..] | [..] | [..] |
-| SafeLoRA | [..] | [..] | [..] | [..] |
-| WiSE-FT λ = 0.5 | [..] | [..] | [..] | [..] |
-| Random projection | [..] | [..] | [..] | [..] |
-| No-drift control | n/a | [..] | [..] | [..] |
+Our own drifted sentinels: S1a (general SFT, 250 steps; harmful compliance +10.7 points over base,
+p < 0.001) chose k; S1b (1,000 steps; +10.0 points) is the held-out test. Harmful compliance is on 150 prompts and
+over-refusal on 100 benign look-alikes, both judged by Qwen3Guard; KL is the mean token KL to the unrepaired adapter
+on 50 benign prompts; task NLL is on 100 held-out rows of the sentinel's own training distribution (lower is better).
+
+| Method | S1a: drift recovered | over-refusal | KL | task NLL | S1b: drift recovered | over-refusal | KL | task NLL |
+|---|---|---|---|---|---|---|---|---|
+| Unrepaired | 0% | — | 0 | 1.384 | 0% | — | 0 | 1.609 |
+| **Gradient projection, k = 4** | **50%** | **+3** | **0.002** | **1.385** | 13% | 0 | 0.004 | 1.598 |
+| SafeLoRA (SafeTune defaults) | 100% | +6 | 0.077 | 1.465 | 93% | +6 | 0.331 | 1.495 |
+| WiSE-FT λ = 0.5 | 94% | +4 | 0.074 | 1.455 | 93% | +2 | 0.149 | 1.448 |
+| WiSE-FT λ = 0.75 | 56% | +2 | 0.012 | 1.397 | 40% | 0 | 0.042 | 1.477 |
+| Random projection, k = 4 | −6% | 0 | 0.00002 | 1.384 | −7% | 0 | 0.0001 | 1.608 |
+
+No-drift control (S2, the narrow support adapter): the projection moved over-refusal by +4 points (KL 0.003).
+
+**Verdict against the five pre-registered criteria: not met.** On S1a the projection meets recovery (≥ 50%),
+over-refusal (≤ +5) and beats the random projection by 56 points; on S1b it recovers only 13%; the no-drift control
+moves over-refusal by 4 points against a limit of 3; and the fidelity comparison with WiSE-FT is undefined as
+pre-registered, because 50% recovery lies below the lowest WiSE-FT point measured (λ = 0.75, 56%). As a sensitivity
+reading only, adding λ = 1 (the unrepaired adapter, recovery 0, KL 0) to WiSE-FT's curve puts WiSE-FT at KL 0.011 for
+50% recovery, five times the projection's 0.002. What holds: a rank-4 edit along the base model's margin gradient,
+which needs no harmful data and no outputs of the adapter being repaired, halves S1a's drift while barely changing
+its benign behaviour. What does not: it does not
+transfer to the longer-trained S1b, where the drift no longer sits in that subspace. WiSE-FT λ = 0.5 is the
+practical repair here.
 
 ### Judges
 
