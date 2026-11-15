@@ -207,7 +207,8 @@ def _adapter_bytes(adapter: Adapter) -> int:
 
 
 def score_folder(root: str | Path, art: ProbeArtifacts, danger: Mapping | None = None, n_random: int = 0,
-                 seed: int = 0, chunk_bytes: int = RANDOM_CHUNK_BYTES) -> tuple[pd.DataFrame, pd.DataFrame | None]:
+                 seed: int = 0, chunk_bytes: int = RANDOM_CHUNK_BYTES,
+                 device: str | None = None) -> tuple[pd.DataFrame, pd.DataFrame | None]:
     """Scores of every adapter under `root`, one row per alias; plus random-direction drifts when `n_random` > 0.
 
     The random-direction frame has one row per alias and columns r0 ... r{n-1}; direction j is the same
@@ -220,7 +221,8 @@ def score_folder(root: str | Path, art: ProbeArtifacts, danger: Mapping | None =
 
     def flush() -> None:
         # Drift is minus the score; every adapter in the chunk shares each drawn direction.
-        draws = -meters.random_direction_scores_many([a for _, a in chunk], art.sketch, n=n_random, seed=seed)
+        draws = -meters.random_direction_scores_many([a for _, a in chunk], art.sketch, n=n_random, seed=seed,
+                                                     device=device)
         randoms.extend({"alias": alias, **{f"r{j}": float(v) for j, v in enumerate(d)}}
                        for (alias, _), d in zip(chunk, draws))
         chunk.clear()

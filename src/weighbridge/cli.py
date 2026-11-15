@@ -43,11 +43,14 @@ def cmd_panels(args: argparse.Namespace) -> None:
 
 def cmd_score(args: argparse.Namespace) -> None:
     """Weights-only scores of every adapter folder under --adapters, as a CSV keyed by alias."""
+    import torch
+
     from . import grad, scoring
 
     art = scoring.load_probe_artifacts(args.probe, args.lang, args.condition)
     danger = grad.load(args.danger) if args.danger else None
-    scores, randoms = scoring.score_folder(args.adapters, art, danger, args.random, args.seed)
+    device = args.device or ("cuda" if torch.cuda.is_available() else None)
+    scores, randoms = scoring.score_folder(args.adapters, art, danger, args.random, args.seed, device=device)
     ensure_dir(args.out.parent)
     scores.to_csv(args.out, index=False)
     if randoms is not None:
@@ -162,6 +165,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--condition", default="shipped")
     p.add_argument("--danger", type=Path, help="SafeLoRA danger deltas or their sketch (grad.save format)")
     p.add_argument("--random", type=int, default=0, help="number of random-direction control draws")
+    p.add_argument("--device", help="device for the random-direction draws (default: cuda when available)")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--out", type=Path, default=RESULTS_DIR / "scores.csv")
     p.set_defaults(func=cmd_score)

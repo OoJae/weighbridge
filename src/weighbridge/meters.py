@@ -138,26 +138,63 @@ def random_orthonormal(rows: int, k: int, generator: torch.Generator, device: to
 
 
 def random_direction_scores_many(adapters: Sequence[Adapter], sketch: Sketch, n: int = 200,
-                                 seed: int = 0) -> torch.Tensor:
+                                 seed: int = 0, device: str | torch.device | None = None) -> torch.Tensor:
     """Control scores of several adapters against the same `n` random directions, shape ``(len(adapters), n)``.
 
     Each random module basis is drawn once and applied to every adapter that has that module, so the cost of
     the QR factorisations is paid once per direction rather than once per adapter. Every adapter's total is
-    summed over its modules in sorted key order, exactly as :func:`random_direction_scores` does.
+    summed over its modules in sorted key order, exactly as :func:`random_direction_scores` does. With
+    `device` (for example "cuda") the same Gaussian draws are factorised and applied there, which is much faster.
     """
-    out = torch.zeros(len(adapters), n, dtype=torch.float64)
+    if device is None:
+        out = torch.zeros(len(adapters), n, dtype=torch.float64)
+        keys = sorted({key for a in adapters for key in a.modules})
+        for j in range(n):
+            for key in keys:
+                users = [(i, a.modules[key]) for i, a in enumerate(adapters) if key in a.modules]
+                U, S, V = sketch[key]
+                gen = torch.Generator(device=U.device).manual_seed(stable_seed(seed, j, *key))
+                k = S.numel()
+                rU = random_orthonormal(U.shape[0], k, gen, U.device)
+                rV = random_orthonormal(V.shape[0], k, gen, U.device)
+                for i, m in users:
+                    out[i, j] += _sketch_term(m, rU, S, rV)
+        return out.float()
+    return _random_scores_on(adapters, sketch, n, seed, torch.device(device))
+
+
+def _random_scores_on(adapters: Sequence[Adapter], sketch: Sketch, n: int, seed: int,
+                      device: torch.device) -> torch.Tensor:
+    """:func:`random_direction_scores_many` with the QR factorisations and products on `device` (a GPU).
+
+    The Gaussian matrices come from the same CPU generators as the CPU path, so direction j is the same
+    direction up to floating-point rounding in the QR; the adapters' factors are moved to `device` once.
+    """
     keys = sorted({key for a in adapters for key in a.modules})
+    users = {key: [(i, a.modules[key].A.to(device, torch.float32), a.modules[key].B.to(device, torch.float32),
+                    a.modules[key].scaling) for i, a in enumerate(adapters) if key in a.modules] for key in keys}
+    out = torch.zeros(len(adapters), n, dtype=torch.float64, device=device)
     for j in range(n):
         for key in keys:
-            users = [(i, a.modules[key]) for i, a in enumerate(adapters) if key in a.modules]
-            U, S, V = sketch[key]
-            gen = torch.Generator(device=U.device).manual_seed(stable_seed(seed, j, *key))
+            _, S, V = sketch[key]
+            U = sketch[key][0]
+            gen = torch.Generator().manual_seed(stable_seed(seed, j, *key))
             k = S.numel()
-            rU = random_orthonormal(U.shape[0], k, gen, U.device)
-            rV = random_orthonormal(V.shape[0], k, gen, U.device)
-            for i, m in users:
-                out[i, j] += _sketch_term(m, rU, S, rV)
-    return out.float()
+            gu = torch.randn(U.shape[0], k, generator=gen).to(device)
+            gv = torch.randn(V.shape[0], k, generator=gen).to(device)
+            rU, rV = _orthonormal_from(gu), _orthonormal_from(gv)
+            Sd = S.to(device, torch.float32)
+            for i, A, B, scaling in users[key]:
+                ub = rU.T @ B                       # (k, r)
+                av = A @ rV                         # (r, k)
+                out[i, j] += scaling * torch.sum(Sd * torch.sum(ub * av.T, dim=1))
+    return out.float().cpu()
+
+
+def _orthonormal_from(gaussian: torch.Tensor) -> torch.Tensor:
+    """Orthonormal columns from a Gaussian matrix by QR, with signs fixed by diag R (as random_orthonormal)."""
+    q, r = torch.linalg.qr(gaussian)
+    return q * torch.sign(torch.diagonal(r)).masked_fill(torch.diagonal(r) == 0, 1.0)
 
 
 def random_direction_scores(adapter: Adapter, sketch: Sketch, n: int = 200, seed: int = 0) -> torch.Tensor:

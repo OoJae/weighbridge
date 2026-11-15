@@ -122,6 +122,9 @@ def test_random_direction_scores_seeded_and_shared(tiny_model, tmp_path, adapter
     many = random_direction_scores_many([adapter, other], sketch, n=12, seed=0)
     assert torch.equal(many[0], scores)
     assert torch.equal(many[1], random_direction_scores(other, sketch, n=12, seed=0))
+    # The device path (a GPU on Kaggle; the CPU here) uses the same Gaussian draws, so it agrees to rounding.
+    on_device = random_direction_scores_many([adapter, other], sketch, n=12, seed=0, device="cpu")
+    assert torch.allclose(on_device, many, rtol=1e-4, atol=1e-6)
 
 
 def test_norm_baselines_and_drift(adapter):
