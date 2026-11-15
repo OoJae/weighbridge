@@ -328,11 +328,14 @@ session; analysis ran on a laptop.
 ## Artifacts
 
 - Code: this repository (MIT).
-- Pre-registration: `PREREG.md`, commit [sha]; manifest commitment [SHA-256].
+- Pre-registration: `PREREG.md`, commit `be92d90` (14 Nov 2026, before any adapter behaviour was measured); manifest
+  commitment `9a441ebb37da5fb940babf2e4b244951cafaddb0231b6f88d2ef0b24377778fa` (salted SHA-256, `PREREG.md` §2).
+- Aggregate results: `results/` (pre-registered analysis output with small cells suppressed, judge validation, native
+  agreement counts), rebuilt by `notebooks/reproduce.ipynb`.
 - Decisions log: `DECISIONS.md`. Ethics: `docs/ETHICS.md`. Related work: `docs/RELATED_WORK.md`.
 - Hugging Face model collection: [link] (sentinels, repaired sentinels, base-model meter artifacts).
 - Hugging Face dataset collection: [link] (prompt panels, aggregate tables, base-model and sentinel logs, native labels).
-- Upstream pull requests: [links, if filed].
+- Upstream pull requests: none filed in Stage 1.
 
 ## Reproduction
 
@@ -342,7 +345,10 @@ python3.12 -m venv .venv && .venv/bin/pip install -e ".[dev]"
 ```
 
 - Every table is rebuilt from the published logs on CPU by `notebooks/reproduce.ipynb`.
-- GPU steps (base-model artifacts, generation, forward-pass screens, repair) run from `jobs/`: [commands].
+- GPU steps (base-model artifacts, generation, forward-pass screens, judging, repair) run from `jobs/` on free Kaggle
+  T4 sessions through `jobs/kaggle_push.py` (plans and commands in `docs/JOBS.md`); the same job scripts run on Colab.
+- Weights-only scoring needs no GPU: `weighbridge score --adapters <folder> --probe <base-model artifacts> --danger
+  <SafeLoRA sketch>`; the analysis is `weighbridge analyze` (both in `src/weighbridge/cli.py`).
 - Third-party adapter results need the private manifest and cannot be rebuilt from public files; the aggregate tables
   and the manifest commitment are published instead.
 

@@ -1,8 +1,21 @@
 # GPU jobs
 
-Every GPU step runs on [Hugging Face Jobs](https://huggingface.co/docs/huggingface_hub/guides/jobs), launched
-by `jobs/launch.py` from the presets in `configs/jobs.yaml`. This page says how to run each job, what it reads
-and writes, and what it costs.
+The job scripts in `jobs/` (`job_probe.py`, `job_sweep.py`, `job_judge.py`, `job_sentinels.py`, `job_c3.py`) are plain
+command-line programs. Stage 1 ran them in two ways, both free:
+
+- **Kaggle (what produced every Stage 1 number).** `jobs/kaggle_push.py bundle` uploads this repository as a private
+  Kaggle dataset; `jobs/kaggle_push.py push <plan.json>` creates a private batch notebook from `jobs/kaggle_kernel.py`
+  that checks the base-model weights against their published SHA-256, then runs the plan's jobs: one queue per T4 GPU,
+  an optional `cpu` queue, and `after` jobs once the queues finish. A plan names its inputs (earlier notebooks'
+  outputs, found again by glob), a per-job timeout and a session deadline, and records a `STATUS.json`. A plan with
+  `"enable_gpu": false` runs on a CPU session, which uses no GPU quota (weights-only scoring ran this way). Every job
+  resumes from the rows it already wrote, so a timed-out run is continued by pushing the same plan again.
+- **Colab (judging only).** `job_judge.py --gen-dir ... --prior-labels ...` on a free T4 labels the generation files
+  copied to the VM and skips adapters already labelled, so a reclaimed VM loses at most one adapter's work. The gated
+  base model and the Hugging Face token never leave the laptop and Kaggle.
+
+The rest of this page describes the original launcher for [Hugging Face Jobs](https://huggingface.co/docs/huggingface_hub/guides/jobs)
+(`jobs/launch.py`, presets in `configs/jobs.yaml`), which takes the same job arguments.
 
 ## Before the first launch
 
