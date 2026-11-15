@@ -22,6 +22,12 @@ def load_kernel(input_dir: Path, temp_dir: Path) -> types.ModuleType:
     return mod
 
 
+def test_cpu_queue_hides_gpus(tmp_path):
+    k = load_kernel(tmp_path / "in", tmp_path / "tmp")
+    assert k.visible_devices("cpu") == "" and k.visible_devices("1") == "1"
+    assert k.gpu_keys({"0": [], "1": [], "cpu": []}) == "0,1" and k.gpu_keys({"cpu": []}) == "0"
+
+
 def test_glob_regex():
     mod = load_kernel(Path("/nonexistent"), Path("/nonexistent"))
     rx = mod.glob_regex("**/tiny-aya/transformers/global/*")

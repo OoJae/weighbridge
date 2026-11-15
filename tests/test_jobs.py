@@ -443,3 +443,17 @@ def test_judge_validation_reads_the_guard_label_keys(tmp_path, monkeypatch):
     jv.main(["--panel", str(panel), "--out", str(out)])
     result = json.loads(out.read_text())
     assert result["judge"]["kappa"] == 1.0 and result["per_item"][0]["judge_safety"] == "Unsafe"
+
+
+def test_fetch_adapters_downloads_each_included_row(tmp_path, monkeypatch):
+    import fetch_adapters
+    from weighbridge import hub
+
+    rows = [{"alias": "a1", "status": "included"}, {"alias": "a2", "status": "included"},
+            {"alias": "x", "status": "excluded"}]
+    shard = tmp_path / "s.jsonl"
+    shard.write_text("".join(json.dumps(r) + "\n" for r in rows))
+    got = []
+    monkeypatch.setattr(hub, "download_adapter", lambda row, dest: got.append((row["alias"], dest)) or dest)
+    fetch_adapters.main(["--shards", str(shard), "--dest", str(tmp_path / "ad")])
+    assert got == [("a1", tmp_path / "ad" / "a1"), ("a2", tmp_path / "ad" / "a2")]

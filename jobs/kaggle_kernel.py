@@ -138,6 +138,17 @@ START = time.time()
 DEADLINE_S = float(PLAN.get("deadline_s", 11.25 * 3600))
 STATUS_LOCK = threading.Lock()
 MIN_JOB_S = 60  # a job is not started with less time than this left
+CPU_QUEUE = "cpu"  # a queue key that runs its jobs with no GPU visible, alongside the GPU queues
+
+
+def visible_devices(gpu: str) -> str:
+    """CUDA_VISIBLE_DEVICES for a queue key: the key itself, or no device for the CPU queue."""
+    return "" if gpu == CPU_QUEUE else gpu
+
+
+def gpu_keys(queues: dict) -> str:
+    """The GPU ids of the plan's queues, joined for the after-jobs (the CPU queue holds no GPU)."""
+    return ",".join(k for k in queues if k != CPU_QUEUE) or "0"
 
 
 def save_status(report: dict) -> None:
@@ -161,7 +172,7 @@ def run_job(job: dict, gpu: str, env: dict, subs: dict, report: dict) -> None:
     t0 = time.time()
     with (LOGS / f"gpu{gpu.replace(',', '')}_{name}.log").open("w") as fh:
         try:
-            proc = subprocess.run(argv, env={**env, "CUDA_VISIBLE_DEVICES": gpu}, stdout=fh,
+            proc = subprocess.run(argv, env={**env, "CUDA_VISIBLE_DEVICES": visible_devices(gpu)}, stdout=fh,
                                   stderr=subprocess.STDOUT, check=False, timeout=timeout)
             code = proc.returncode
         except subprocess.TimeoutExpired:
@@ -235,7 +246,7 @@ def main() -> None:
     for t in threads:
         t.join()
     # Jobs that need every queue's results (scoring, summaries) run last and see both GPUs.
-    gpus = ",".join(PLAN["queues"]) or "0"
+    gpus = gpu_keys(PLAN["queues"])
     for job in PLAN.get("after", []):
         run_job(job, gpus, env, subs, report)
     report["wall_seconds"] = round(time.time() - START, 1)

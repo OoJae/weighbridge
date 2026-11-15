@@ -148,6 +148,13 @@ def test_cli_score_ranks_the_planted_adapter_first(world, probe_dir, tmp_path):
     assert scores["skipped_keys"].eq(0).all() and scores["weights_digest"].is_unique
     randoms = pd.read_csv(cli.random_path(out))
     assert list(randoms.columns) == ["alias", "r0", "r1", "r2"]
+    # Chunking the adapters (here one per chunk) changes memory use, not the random-direction drifts.
+    from weighbridge import scoring
+
+    art = scoring.load_probe_artifacts(probe_dir)
+    _, whole = scoring.score_folder(world["root"] / "adapters", art, n_random=3)
+    _, chunked = scoring.score_folder(world["root"] / "adapters", art, n_random=3, chunk_bytes=1)
+    pd.testing.assert_frame_equal(whole, chunked)
 
 
 def test_cli_repair_saves_a_peft_folder_without_the_drift(world, probe_dir, tmp_path, capsys):

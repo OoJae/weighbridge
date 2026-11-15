@@ -198,25 +198,42 @@ def random_drifts(adapter: Adapter, sketch: Sketch, n: int, seed: int = 0) -> li
     return [-float(s) for s in meters.random_direction_scores(adapter, sketch, n=n, seed=seed)]
 
 
+RANDOM_CHUNK_BYTES = 4 * 10**9  # adapters held at once for the shared random directions (float32 factors)
+
+
+def _adapter_bytes(adapter: Adapter) -> int:
+    """Bytes of the adapter's float32 factors."""
+    return sum((m.A.numel() + m.B.numel()) * 4 for m in adapter.modules.values())
+
+
 def score_folder(root: str | Path, art: ProbeArtifacts, danger: Mapping | None = None, n_random: int = 0,
-                 seed: int = 0) -> tuple[pd.DataFrame, pd.DataFrame | None]:
+                 seed: int = 0, chunk_bytes: int = RANDOM_CHUNK_BYTES) -> tuple[pd.DataFrame, pd.DataFrame | None]:
     """Scores of every adapter under `root`, one row per alias; plus random-direction drifts when `n_random` > 0.
 
     The random-direction frame has one row per alias and columns r0 ... r{n-1}; direction j is the same
     direction for every adapter, so column j gives one draw of the null distribution of a rank correlation.
+    Random directions are drawn once per chunk of adapters holding at most `chunk_bytes` of factors.
     """
     import pandas as pd
 
-    rows, aliases, adapters = [], [], []
+    rows, randoms, chunk = [], [], []
+
+    def flush() -> None:
+        # Drift is minus the score; every adapter in the chunk shares each drawn direction.
+        draws = -meters.random_direction_scores_many([a for _, a in chunk], art.sketch, n=n_random, seed=seed)
+        randoms.extend({"alias": alias, **{f"r{j}": float(v) for j, v in enumerate(d)}}
+                       for (alias, _), d in zip(chunk, draws))
+        chunk.clear()
+
     for alias, path in find_adapters(root):
         adapter = lora.load_adapter(path, name=alias)
         rows.append({"alias": alias, **score_adapter(adapter, art, danger)})
         if n_random:
-            aliases.append(alias)
-            adapters.append(adapter)
+            if chunk and sum(_adapter_bytes(a) for _, a in chunk) + _adapter_bytes(adapter) > chunk_bytes:
+                flush()
+            chunk.append((alias, adapter))
     if not n_random:
         return pd.DataFrame(rows), None
-    # Each random direction is drawn once and applied to every adapter (drift = minus the score).
-    draws = -meters.random_direction_scores_many(adapters, art.sketch, n=n_random, seed=seed)
-    randoms = [{"alias": a, **{f"r{j}": float(v) for j, v in enumerate(d)}} for a, d in zip(aliases, draws)]
+    if chunk:
+        flush()
     return pd.DataFrame(rows), pd.DataFrame(randoms)
