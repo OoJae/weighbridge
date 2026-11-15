@@ -6,7 +6,7 @@ import torch
 
 from weighbridge.common import RESIDUAL_WRITERS, module_path
 from weighbridge.lora import Adapter, LoraModule, load_adapter, stack
-from weighbridge.meters import (drift, log_delta_norm, random_direction_scores, random_orthonormal,
+from weighbridge.meters import (drift, log_delta_norm, random_direction_scores, random_direction_scores_many, random_orthonormal,
                                 safelora_similarity, spectral_baseline, t0a_linearised, t0b_first_order,
                                 t0b_sketch)
 from weighbridge.testing import make_random_lora
@@ -118,6 +118,10 @@ def test_random_direction_scores_seeded_and_shared(tiny_model, tmp_path, adapter
     both = random_direction_scores(stack(adapter, other), sketch, n=12, seed=0)
     expected = scores + random_direction_scores(other, sketch, n=12, seed=0)
     assert torch.allclose(both, expected, rtol=1e-4, atol=1e-6)
+    # The batched form draws each direction once and gives every adapter the same score as alone.
+    many = random_direction_scores_many([adapter, other], sketch, n=12, seed=0)
+    assert torch.equal(many[0], scores)
+    assert torch.equal(many[1], random_direction_scores(other, sketch, n=12, seed=0))
 
 
 def test_norm_baselines_and_drift(adapter):

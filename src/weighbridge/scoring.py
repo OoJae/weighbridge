@@ -207,11 +207,16 @@ def score_folder(root: str | Path, art: ProbeArtifacts, danger: Mapping | None =
     """
     import pandas as pd
 
-    rows, randoms = [], []
+    rows, aliases, adapters = [], [], []
     for alias, path in find_adapters(root):
         adapter = lora.load_adapter(path, name=alias)
         rows.append({"alias": alias, **score_adapter(adapter, art, danger)})
         if n_random:
-            draws = random_drifts(adapter, art.sketch, n_random, seed)
-            randoms.append({"alias": alias, **{f"r{j}": v for j, v in enumerate(draws)}})
-    return pd.DataFrame(rows), (pd.DataFrame(randoms) if n_random else None)
+            aliases.append(alias)
+            adapters.append(adapter)
+    if not n_random:
+        return pd.DataFrame(rows), None
+    # Each random direction is drawn once and applied to every adapter (drift = minus the score).
+    draws = -meters.random_direction_scores_many(adapters, art.sketch, n=n_random, seed=seed)
+    randoms = [{"alias": a, **{f"r{j}": float(v) for j, v in enumerate(d)}} for a, d in zip(aliases, draws)]
+    return pd.DataFrame(rows), pd.DataFrame(randoms)

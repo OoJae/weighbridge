@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import math
-from typing import Literal
+from typing import Literal, Sequence
 
 import torch
 
@@ -137,16 +137,27 @@ def random_orthonormal(rows: int, k: int, generator: torch.Generator, device: to
     return q * torch.sign(torch.diagonal(r)).masked_fill(torch.diagonal(r) == 0, 1.0)
 
 
-def _random_direction_score(adapter: Adapter, sketch: Sketch, draw: int, seed: int) -> float:
-    """Score of one random direction: per module, random orthonormal U, V with the sketch's singular values."""
-    total = 0.0
-    for key, m in sorted(adapter.modules.items()):
-        U, S, V = sketch[key]
-        gen = torch.Generator(device=U.device).manual_seed(stable_seed(seed, draw, *key))
-        k = S.numel()
-        total += _sketch_term(m, random_orthonormal(U.shape[0], k, gen, U.device), S,
-                              random_orthonormal(V.shape[0], k, gen, U.device))
-    return total
+def random_direction_scores_many(adapters: Sequence[Adapter], sketch: Sketch, n: int = 200,
+                                 seed: int = 0) -> torch.Tensor:
+    """Control scores of several adapters against the same `n` random directions, shape ``(len(adapters), n)``.
+
+    Each random module basis is drawn once and applied to every adapter that has that module, so the cost of
+    the QR factorisations is paid once per direction rather than once per adapter. Every adapter's total is
+    summed over its modules in sorted key order, exactly as :func:`random_direction_scores` does.
+    """
+    out = torch.zeros(len(adapters), n, dtype=torch.float64)
+    keys = sorted({key for a in adapters for key in a.modules})
+    for j in range(n):
+        for key in keys:
+            users = [(i, a.modules[key]) for i, a in enumerate(adapters) if key in a.modules]
+            U, S, V = sketch[key]
+            gen = torch.Generator(device=U.device).manual_seed(stable_seed(seed, j, *key))
+            k = S.numel()
+            rU = random_orthonormal(U.shape[0], k, gen, U.device)
+            rV = random_orthonormal(V.shape[0], k, gen, U.device)
+            for i, m in users:
+                out[i, j] += _sketch_term(m, rU, S, rV)
+    return out.float()
 
 
 def random_direction_scores(adapter: Adapter, sketch: Sketch, n: int = 200, seed: int = 0) -> torch.Tensor:
@@ -157,6 +168,5 @@ def random_direction_scores(adapter: Adapter, sketch: Sketch, n: int = 200, seed
     every adapter scored, which is what a null distribution of rank correlations needs. Draws are generated on
     the sketch's device; CPU and CUDA generators give different (equally valid) directions.
     """
-    return torch.tensor([_random_direction_score(adapter, sketch, j, seed) for j in range(n)],
-                        dtype=torch.float32)
+    return random_direction_scores_many([adapter], sketch, n=n, seed=seed)[0]
 

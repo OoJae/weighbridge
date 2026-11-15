@@ -9,6 +9,7 @@ from weighbridge import probe
 from weighbridge.runner_peft import (
     BASE_ALIAS,
     AdapterHost,
+    peft_adapter_name,
     append_jsonl,
     done_keys,
     generate_peft,
@@ -167,6 +168,18 @@ def test_hot_swap_matches_a_fresh_load(model, tiny_model, adapters):
     fresh = PeftModel.from_pretrained(copy.deepcopy(tiny_model), str(adapters[1][1])).eval()
     assert torch.allclose(swapped, _logits(fresh, ids), atol=1e-6)
     assert host.peft.peft_config.keys() == {adapters[1][0]}
+    host.close()
+
+
+def test_dotted_alias_loads_and_scales(model, adapters, tmp_path):
+    """Aliases like ``S1a__wise-0.25`` are valid aliases but not valid PEFT module names."""
+    ids = torch.tensor([[2, 4, 7, 40, 41, 6, 4, 8]])
+    host = AdapterHost(model)
+    for alias in ("x__wise-0.25", "x__wise-0.5"):
+        with host.use(alias, adapters[0][1]) as m:
+            with scaled_adapter(m, peft_adapter_name(alias), 0.0):
+                assert torch.allclose(_logits(m, ids), _logits(model, ids), atol=1e-6)
+    assert host.peft.peft_config.keys() == {"x__wise-0_5"}
     host.close()
 
 

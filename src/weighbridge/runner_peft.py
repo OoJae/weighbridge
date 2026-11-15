@@ -117,6 +117,11 @@ def load_base(base_model_id: str = BASE_REPO, revision: str | None = None) -> tu
     return model, tokenizer
 
 
+def peft_adapter_name(alias: str) -> str:
+    """The PEFT adapter name for an alias: PEFT module names may not contain dots (``S1a__wise-0.25``)."""
+    return alias.replace(".", "_")
+
+
 class AdapterHost:
     """Keeps one base model and swaps PEFT adapters onto it, holding at most one adapter at a time."""
 
@@ -144,14 +149,15 @@ class AdapterHost:
         """Load ``alias`` and make it the only adapter: load the new one, activate it, delete the old one."""
         if self.loaded == alias:
             return
+        name = peft_adapter_name(alias)
         if self.peft is None:
             from peft import PeftModel
 
-            self.peft = PeftModel.from_pretrained(self.base, str(path), adapter_name=alias)
+            self.peft = PeftModel.from_pretrained(self.base, str(path), adapter_name=name)
         else:
-            self.peft.load_adapter(str(path), adapter_name=alias)
-            self.peft.set_adapter(alias)
-            self.peft.delete_adapter(self.loaded)
+            self.peft.load_adapter(str(path), adapter_name=name)
+            self.peft.set_adapter(name)
+            self.peft.delete_adapter(peft_adapter_name(self.loaded))
         self.peft.eval()
         self.loaded = alias
 
@@ -355,7 +361,7 @@ def _t1_adapter(model: Any, tokenizer: Any, alias: str, conditions: Sequence[str
             todo = [g for g in groups if (alias, condition, g[0], g[1], scale) not in done]
             if not todo:
                 continue
-            ctx = nullcontext(model) if alias == BASE_ALIAS else scaled_adapter(model, alias, scale)
+            ctx = nullcontext(model) if alias == BASE_ALIAS else scaled_adapter(model, peft_adapter_name(alias), scale)
             with ctx:
                 rows = [_t1_row(model, tokenizer, alias, condition, g, groups[g], dirs, lay, scale, batch_size)
                         for g in todo]
