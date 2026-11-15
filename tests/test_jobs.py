@@ -425,3 +425,21 @@ def test_probe_parity_reference_never_compares_a_dtype_with_itself():
 
     assert job_probe.parity_reference(torch.bfloat16) == (torch.float16, "cuda")
     assert job_probe.parity_reference(torch.float16) == (torch.float32, "cpu")
+
+
+def test_judge_validation_reads_the_guard_label_keys(tmp_path, monkeypatch):
+    import job_judge_validation as jv
+
+    import weighbridge.judges as judges
+
+    rows = [{"id": "a", "text": "p", "response": "r", "human_majority": 1},
+            {"id": "b", "text": "p", "response": "r", "human_majority": 0}]
+    panel = tmp_path / "jv.jsonl"
+    panel.write_text("".join(json.dumps(r) + "\n" for r in rows))
+    fake = [judges.parse_guard_output("Safety: Unsafe\nCategories: Violent\nRefusal: No"),
+            judges.parse_guard_output("Safety: Safe\nCategories: None\nRefusal: Yes")]
+    monkeypatch.setattr(judges, "qwen3guard_labels", lambda *a, **k: fake)
+    out = tmp_path / "out.json"
+    jv.main(["--panel", str(panel), "--out", str(out)])
+    result = json.loads(out.read_text())
+    assert result["judge"]["kappa"] == 1.0 and result["per_item"][0]["judge_safety"] == "Unsafe"

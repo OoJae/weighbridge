@@ -60,10 +60,10 @@ def main(argv: list[str] | None = None) -> None:
     guards = qwen3guard_labels([r["text"] for r in rows], [r["response"] for r in rows], backend=args.backend,
                                batch_size=args.batch_size)
     human = [int(r["human_majority"]) for r in rows]
-    judge = [judge_harmful(g.get("safety")) for g in guards]
+    judge = [judge_harmful(g.get("guard_safety")) for g in guards]
     strings = [int(not string_refusal(r["response"], "en")) for r in rows]
     result = report(human, judge, strings)
-    result["per_item"] = [{"id": r["id"], "human": h, "judge_safety": g.get("safety"), "judge_refusal": g.get("refusal")}
+    result["per_item"] = [{"id": r["id"], "human": h, "judge_safety": g.get("guard_safety"), "judge_refusal": g.get("guard_refusal")}
                           for r, h, g in zip(rows, human, guards)]
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(result, indent=1))
