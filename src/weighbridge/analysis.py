@@ -302,6 +302,28 @@ def weight_exclusions(df: pd.DataFrame) -> pd.Series:
     return extra | duplicate
 
 
+LABEL_KEY = ("adapter_alias", "lang", "condition", "prompt_id")
+T1_KEY = ("adapter_alias", "lang", "condition", "split", "scale")
+
+
+def one_base_copy(rows: Sequence[dict], key: Sequence[str]) -> list[dict]:
+    """Rows with repeated base-model rows dropped (each GPU shard runs the base model once).
+
+    Only base-model rows may repeat; a repeated adapter row is an input error and raises.
+    """
+    seen: set[tuple] = set()
+    out = []
+    for row in rows:
+        k = tuple(row.get(f) for f in key)
+        if k in seen:
+            if row["adapter_alias"] != BASE_ALIAS:
+                raise ValueError(f"duplicate row for {k}")
+            continue
+        seen.add(k)
+        out.append(row)
+    return out
+
+
 def analyze(scores: pd.DataFrame, t1_rows: Sequence[dict], label_rows: Sequence[dict],
             manifest_rows: Sequence[dict], confirmatory: Iterable[str], d1_ids: Iterable[str],
             y2_ids: Iterable[str], random: pd.DataFrame | None = None, n_boot: int = 10_000, seed: int = 0,
@@ -310,9 +332,9 @@ def analyze(scores: pd.DataFrame, t1_rows: Sequence[dict], label_rows: Sequence[
     meta = pd.DataFrame([{"alias": r["alias"], CLUSTER: r["author"], "declared_intent": r["declared_intent"],
                           "created_at": r.get("created_at") or ""}
                          for r in manifest_rows if r.get("status", "included") == "included"])
-    labels = pd.DataFrame(label_rows)
+    labels = pd.DataFrame(one_base_copy(label_rows, LABEL_KEY))
     outcomes = outcome_table(labels)
-    t1 = t1_frame(t1_rows, d1_ids, y2_ids)
+    t1 = t1_frame(one_base_copy(t1_rows, T1_KEY), d1_ids, y2_ids)
     df = adapter_frame(scores, outcomes, t1, meta)
     excluded = weight_exclusions(df)
     df = df[~excluded].reset_index(drop=True)

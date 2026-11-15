@@ -181,3 +181,14 @@ def test_metadata_features_and_spot_check():
               for i, lab in enumerate(labs)]
     spot = A.spot_check_scores(pd.DataFrame(labels))
     assert spot.set_index("alias").loc["a", "spot_check"] == 50.0
+
+
+def test_one_base_copy_drops_repeated_base_rows_only():
+    from weighbridge.analysis import LABEL_KEY, one_base_copy
+    from weighbridge.runner_peft import BASE_ALIAS
+
+    row = {"lang": "en", "condition": "shipped", "prompt_id": "p1"}
+    base, other = {**row, "adapter_alias": BASE_ALIAS}, {**row, "adapter_alias": "a_1"}
+    assert one_base_copy([base, other, dict(base)], LABEL_KEY) == [base, other]
+    with pytest.raises(ValueError, match="duplicate"):
+        one_base_copy([other, dict(other)], LABEL_KEY)
