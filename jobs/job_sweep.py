@@ -104,6 +104,19 @@ def adapter_fetcher(dest_root: Path) -> Fetch:
     return fetch
 
 
+def try_fetch(fetch: Fetch, row: dict) -> Path | None:
+    """The adapter folder, or None (logged) when the pinned revision can no longer be downloaded.
+
+    An author can delete or rewrite a repository after the snapshot; that adapter is reported as missing for the
+    stages it did not reach, and the rest of the shard still runs.
+    """
+    try:
+        return fetch(row)
+    except Exception as exc:  # noqa: BLE001 - any download failure means the adapter is unavailable
+        log.warning("adapter %s unavailable, skipped: %s", row["alias"], str(exc).splitlines()[0])
+        return None
+
+
 # ---- Output sync -------------------------------------------------------------------------------
 
 class RunSync:
@@ -189,7 +202,10 @@ def run_generation(args: argparse.Namespace, rows: Sequence[dict], panel_rows: S
         _push(sync, generate([], True, raw / f"{BASE_ALIAS}.jsonl"), f"{args.run_id}: generations {BASE_ALIAS}")
     for i, row in enumerate(rows):
         start = time.perf_counter()
-        out = generate([(row["alias"], fetch(row))], False, raw / f"{row['alias']}.jsonl")
+        folder = try_fetch(fetch, row)
+        if folder is None:
+            continue
+        out = generate([(row["alias"], folder)], False, raw / f"{row['alias']}.jsonl")
         _push(sync, out, f"{args.run_id}: generations {row['alias']}")
         log.info("generation %d/%d %s done in %.0fs", i + 1, len(rows), row["alias"], time.perf_counter() - start)
 
@@ -289,7 +305,10 @@ def run_t1(args: argparse.Namespace, rows: Sequence[dict], t1_rows: Sequence[dic
     t1_dir = ensure_dir(run_dir / "t1")
     jobs = ([] if args.skip_base else [(BASE_ALIAS, None)]) + [(r["alias"], r) for r in rows]
     for i, (alias, row) in enumerate(jobs):
-        adapters = [] if row is None else [(alias, fetch(row))]
+        folder = None if row is None else try_fetch(fetch, row)
+        if row is not None and folder is None:
+            continue
+        adapters = [] if row is None else [(alias, folder)]
         out = t1_peft(args.base_model, adapters, t1_rows, args.conditions, directions, t1_dir / f"{alias}.jsonl",
                       scales=scales, layer=layer, include_base=row is None, model=model, tokenizer=tok,
                       revision=args.revision)

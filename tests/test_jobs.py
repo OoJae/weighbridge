@@ -465,3 +465,15 @@ def test_judge_select_rows_filters_done_adapters_and_conditions():
     rows = [{"adapter_alias": a, "condition": c} for a in ("x", "y") for c in ("shipped", "minimal")]
     assert job_judge.select_rows(rows, {"x"}, None) == rows[2:]
     assert job_judge.select_rows(rows, set(), ["shipped"]) == [rows[0], rows[2]]
+
+
+def test_sweep_try_fetch_skips_unavailable_adapters(tmp_path):
+    import job_sweep
+
+    def fetch(row):
+        if row["alias"] == "gone":
+            raise FileNotFoundError("404 Entry Not Found\nmore")
+        return tmp_path / row["alias"]
+
+    assert job_sweep.try_fetch(fetch, {"alias": "ok"}) == tmp_path / "ok"
+    assert job_sweep.try_fetch(fetch, {"alias": "gone"}) is None
