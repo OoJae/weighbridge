@@ -7,9 +7,19 @@
  "ok": true,
  "near_duplicates_by_design_twins": [
   [
-   "en_outcome_benign:jbb-b-032",
    "en_outcome_harmful:jbb-h-032",
+   "en_outcome_benign:jbb-b-032",
    0.765625
+  ],
+  [
+   "en_outcome_harmful:para-012",
+   "pcm_native:pcm-para-012",
+   0.71875
+  ],
+  [
+   "en_outcome_harmful:para-019",
+   "pcm_native:pcm-para-019",
+   0.734375
   ]
  ]
 }

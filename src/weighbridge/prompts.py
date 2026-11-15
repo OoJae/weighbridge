@@ -293,12 +293,23 @@ def _jaccard_matrix(grams_a: list[frozenset[str]], grams_b: list[frozenset[str]]
 
 
 def _twin_mask(rows_a: Sequence[dict], rows_b: Sequence[dict]) -> np.ndarray:
-    """Boolean matrix marking row pairs that share a pair_id (designed contrast twins or translations)."""
+    """Boolean matrix marking designed twins: rows sharing a pair_id, or a translation and its source row.
+
+    A translation (a row with ``english_source``) names its source row's id as its pair_id, while the source row
+    keeps its own pair_id (for example a JailbreakBench index), so translations are matched by id as well.
+    """
     import numpy as np
 
     ids_a = np.array([r.get("pair_id") or f"\0a{i}" for i, r in enumerate(rows_a)], dtype=object)
     ids_b = np.array([r.get("pair_id") or f"\0b{i}" for i, r in enumerate(rows_b)], dtype=object)
-    return ids_a[:, None] == ids_b[None, :]
+    src_a = np.array([r["pair_id"] if r.get("english_source") and r.get("pair_id") else f"\0sa{i}"
+                      for i, r in enumerate(rows_a)], dtype=object)
+    src_b = np.array([r["pair_id"] if r.get("english_source") and r.get("pair_id") else f"\0sb{i}"
+                      for i, r in enumerate(rows_b)], dtype=object)
+    row_a = np.array([r["id"] for r in rows_a], dtype=object)
+    row_b = np.array([r["id"] for r in rows_b], dtype=object)
+    return ((ids_a[:, None] == ids_b[None, :]) | (src_a[:, None] == row_b[None, :])
+            | (row_a[:, None] == src_b[None, :]))
 
 
 def _pair_overlap(a: str, rows_a: Sequence[dict], b: str, rows_b: Sequence[dict], threshold: float) -> PairOverlap:
@@ -569,10 +580,17 @@ def curatorkit_leak_report(panels: Mapping[str, Sequence[Mapping[str, Any]]],
     report = dict(leakage_report(splits, near_dup_threshold=threshold))
     pair = {f"{name}:{r['id']}": str(r.get("pair_id") or r["id"]) for name, rows in panels.items() for r in rows}
     twins = {"en_outcome_harmful", "en_outcome_benign"}
+    # A translation names its English source row's id as its pair_id (see _twin_mask).
+    source_of = {f"{name}:{r['id']}": str(r["pair_id"]) for name, rows in panels.items() for r in rows
+                 if r.get("english_source") and r.get("pair_id")}
+
+    def translation(a: str, b: str) -> bool:
+        return source_of.get(a) == b.split(":", 1)[1] or source_of.get(b) == a.split(":", 1)[1]
 
     def by_design(a: str, b: str) -> bool:
-        # JailbreakBench harmful behaviours and their benign look-alikes are twins on purpose (Y vs over-refusal).
-        return {a.split(":")[0], b.split(":")[0]} == twins and pair.get(a) == pair.get(b)
+        # JailbreakBench harmful behaviours and their benign look-alikes are twins on purpose (Y vs over-refusal),
+        # and a native prompt is meant to say what its English source says.
+        return ({a.split(":")[0], b.split(":")[0]} == twins and pair.get(a) == pair.get(b)) or translation(a, b)
 
     near = [tuple(x) for x in report.get("near_duplicates", [])]
     report["near_duplicates_by_design_twins"] = [x for x in near if by_design(x[0], x[1])]
