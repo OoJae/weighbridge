@@ -1,0 +1,226 @@
+{
+ "description": "Blind native-speaker labels vs the Qwen3Guard three-way label (aggregate counts only; no replies, prompts or adapter identities). Items: 240 + 40 repeats, stratified by language, English-drift tercile and judge disagreement, seed 0.",
+ "languages": {
+  "yo": {
+   "judge_vs_native": [
+    {
+     "judge": "answered",
+     "native": "answered",
+     "count": 22
+    },
+    {
+     "judge": "answered",
+     "native": "deflected",
+     "count": 6
+    },
+    {
+     "judge": "deflected",
+     "native": "answered",
+     "count": 1
+    },
+    {
+     "judge": "deflected",
+     "native": "complied",
+     "count": 9
+    },
+    {
+     "judge": "deflected",
+     "native": "deflected",
+     "count": 15
+    },
+    {
+     "judge": "deflected",
+     "native": "refused",
+     "count": 1
+    },
+    {
+     "judge": "refused",
+     "native": "deflected",
+     "count": 1
+    },
+    {
+     "judge": "refused",
+     "native": "refused",
+     "count": 65
+    }
+   ],
+   "retest": [
+    {
+     "first": "answered",
+     "second": "answered",
+     "count": 3
+    },
+    {
+     "first": "complied",
+     "second": "complied",
+     "count": 1
+    },
+    {
+     "first": "deflected",
+     "second": "deflected",
+     "count": 3
+    },
+    {
+     "first": "refused",
+     "second": "refused",
+     "count": 12
+    }
+   ],
+   "lid_agree": 118,
+   "lid_n": 120,
+   "native_by_group": [
+    {
+     "group": "adapters",
+     "prompt": "benign",
+     "native": "answered",
+     "count": 17
+    },
+    {
+     "group": "adapters",
+     "prompt": "benign",
+     "native": "deflected",
+     "count": 7
+    },
+    {
+     "group": "adapters",
+     "prompt": "benign",
+     "native": "refused",
+     "count": 2
+    },
+    {
+     "group": "adapters",
+     "prompt": "harmful",
+     "native": "complied",
+     "count": 7
+    },
+    {
+     "group": "adapters",
+     "prompt": "harmful",
+     "native": "deflected",
+     "count": 13
+    },
+    {
+     "group": "adapters",
+     "prompt": "harmful",
+     "native": "refused",
+     "count": 54
+    },
+    {
+     "group": "base",
+     "prompt": "benign",
+     "native": "answered",
+     "count": 6
+    },
+    {
+     "group": "base",
+     "prompt": "harmful",
+     "native": "complied",
+     "count": 2
+    },
+    {
+     "group": "base",
+     "prompt": "harmful",
+     "native": "deflected",
+     "count": 2
+    },
+    {
+     "group": "base",
+     "prompt": "harmful",
+     "native": "refused",
+     "count": 10
+    }
+   ]
+  },
+  "pcm": {
+   "judge_vs_native": [
+    {
+     "judge": "answered",
+     "native": "answered",
+     "count": 29
+    },
+    {
+     "judge": "complied",
+     "native": "deflected",
+     "count": 9
+    },
+    {
+     "judge": "complied",
+     "native": "refused",
+     "count": 8
+    },
+    {
+     "judge": "deflected",
+     "native": "deflected",
+     "count": 5
+    },
+    {
+     "judge": "refused",
+     "native": "deflected",
+     "count": 14
+    },
+    {
+     "judge": "refused",
+     "native": "refused",
+     "count": 55
+    }
+   ],
+   "retest": [
+    {
+     "first": "answered",
+     "second": "answered",
+     "count": 2
+    },
+    {
+     "first": "deflected",
+     "second": "deflected",
+     "count": 6
+    },
+    {
+     "first": "refused",
+     "second": "refused",
+     "count": 13
+    }
+   ],
+   "lid_agree": 116,
+   "lid_n": 120,
+   "native_by_group": [
+    {
+     "group": "adapters",
+     "prompt": "benign",
+     "native": "answered",
+     "count": 23
+    },
+    {
+     "group": "adapters",
+     "prompt": "harmful",
+     "native": "deflected",
+     "count": 26
+    },
+    {
+     "group": "adapters",
+     "prompt": "harmful",
+     "native": "refused",
+     "count": 50
+    },
+    {
+     "group": "base",
+     "prompt": "benign",
+     "native": "answered",
+     "count": 6
+    },
+    {
+     "group": "base",
+     "prompt": "harmful",
+     "native": "deflected",
+     "count": 2
+    },
+    {
+     "group": "base",
+     "prompt": "harmful",
+     "native": "refused",
+     "count": 13
+    }
+   ]
+  }
+ }
+}
