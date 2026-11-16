@@ -7,8 +7,9 @@ GPU-seconds) and ρ = −0.04 for the size of the weight change; a 50-prompt beh
 reference, reached ρ = 0.65 at about 20 times the cost on a GPU. A training-free rank-4 projection halved one drifted
 adapter's harmful-compliance increase with 3 points of added over-refusal, but did not transfer to a longer-trained one.
 
-> Content warning: this project studies requests for harmful content. Harmful completions are never shown; they
-> appear only as labels and hashes.
+> Content warning: this project studies requests for harmful content. No model output from this study is published;
+> outputs appear only as labels. The judge-validation file (`data/panels/judge_validation.jsonl`) reproduces
+> JailbreakBench's public `judge_comparison` set (MIT), which includes model responses to harmful requests.
 
 ## Tracks and problem statements
 
@@ -72,7 +73,7 @@ What is and is not new is set out in `docs/RELATED_WORK.md`.
 
 ### AuditKIT (1.1.12)
 - Paired bootstraps over prompts with `auditkit.compare(...).significance(...)`, fed our judge labels as
-  precomputed outputs with a custom scorer (`weighbridge/audit.py`): each sentinel against the base model and each
+  precomputed outputs with a custom scorer (`src/weighbridge/audit.py`): each sentinel against the base model and each
   repaired sentinel against its unrepaired self, for harmful compliance and over-refusal.
 
 ### SafeTune (0.1.19)
@@ -342,23 +343,45 @@ session; analysis ran on a laptop.
 - Aggregate results: `results/` (pre-registered analysis output with small cells suppressed, judge validation, native
   agreement counts), rebuilt by `notebooks/reproduce.ipynb`.
 - Decisions log: `DECISIONS.md`. Ethics: `docs/ETHICS.md`. Related work: `docs/RELATED_WORK.md`.
-- Hugging Face collection: https://huggingface.co/collections/hefbruhi/weighbridge-6afaa3bc120d5e7cae157ba5. It holds:
+- Hugging Face collection: [hefbruhi/weighbridge](https://huggingface.co/collections/hefbruhi/weighbridge-6afaa3bc120d5e7cae157ba5).
+  It holds:
   - the four sentinel adapters;
   - `hefbruhi/weighbridge-meters`, the base-model files the weights-only screens read (score an adapter on a CPU in
     under a second);
   - `hefbruhi/weighbridge-results`, with the prompt panels, aggregate tables, native-agreement counts, judge labels for
     the base model and the sentinels, and the repair report.
-- Repaired sentinels are not uploaded; `jobs/job_c3.py` rebuilds them deterministically from the published sentinels.
+- Repaired sentinels are not uploaded; `jobs/job_c3.py` rebuilds them from the published sentinels (GPU).
 - Upstream pull requests: none filed in Stage 1.
 
 ## Reproduction
 
 ```bash
+git clone --branch stage1 https://github.com/OoJae/weighbridge && cd weighbridge
 python3.12 -m venv .venv && .venv/bin/pip install -e ".[dev]"
 .venv/bin/python -m pytest            # unit tests, CPU, seconds
 ```
 
-- Every table is rebuilt from the published logs on CPU by `notebooks/reproduce.ipynb`.
+**Try the screen on a CPU** (no GPU, no token; about 1.7 GB of downloads):
+
+```bash
+.venv/bin/hf download hefbruhi/weighbridge-meters --local-dir meters
+.venv/bin/hf download hefbruhi/weighbridge-sentinel-s1a --local-dir adapters/S1a
+.venv/bin/hf download hefbruhi/weighbridge-sentinel-s2 --local-dir adapters/S2
+.venv/bin/weighbridge score --adapters adapters --probe meters --danger meters/danger_sketch.safetensors \
+    --device cpu --out scores.csv
+```
+
+`scores.csv` has one row per adapter; `d0b_sketch` is the weights-only screen (higher means more expected drift).
+Any LoRA adapter of `CohereLabs/tiny-aya-global` can go in its own sub-folder of `adapters/`. Scoring takes under a
+second per adapter after loading.
+
+**Rebuild every table** from the published aggregate files:
+
+```bash
+.venv/bin/pip install jupyter && .venv/bin/jupyter nbconvert --to notebook --execute notebooks/reproduce.ipynb
+```
+
+- The notebook re-checks the Holm correction, the verdict rule and every κ against the reported values.
 - GPU steps (base-model artifacts, generation, forward-pass screens, judging, repair) run from `jobs/` on free Kaggle
   T4 sessions through `jobs/kaggle_push.py` (plans and commands in `docs/JOBS.md`); the same job scripts run on Colab.
 - Weights-only scoring needs no GPU: `weighbridge score --adapters <folder> --probe <base-model artifacts> --danger

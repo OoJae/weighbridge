@@ -40,8 +40,8 @@ problem in your final report instead. All constants come from `src/weighbridge/c
 
 ## Ground rules for builders
 
-- Python 3.12, run everything with `.venv/bin/python` from the repo root
-  (`/Users/oluwademilade/Desktop/Lexis/weighbridge`). Run tests with `.venv/bin/python -m pytest tests/<your files>`.
+- Python 3.12, run everything with `.venv/bin/python` from the repo root.
+  Run tests with `.venv/bin/python -m pytest tests/<your files>`.
 - **Do not install packages.** If you need one that is missing, import it lazily inside the function that
   needs it, and name it in your final report.
 - **Only create or edit the files you own.** You may read anything.
