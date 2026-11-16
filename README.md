@@ -342,7 +342,7 @@ session; analysis ran on a laptop.
 - Aggregate results: `results/` (pre-registered analysis output with small cells suppressed, judge validation, native
   agreement counts), rebuilt by `notebooks/reproduce.ipynb`.
 - Decisions log: `DECISIONS.md`. Ethics: `docs/ETHICS.md`. Related work: `docs/RELATED_WORK.md`.
-- Hugging Face collection: [link]. It holds:
+- Hugging Face collection: https://huggingface.co/collections/hefbruhi/weighbridge-6afaa3bc120d5e7cae157ba5. It holds:
   - the four sentinel adapters;
   - `hefbruhi/weighbridge-meters`, the base-model files the weights-only screens read (score an adapter on a CPU in
     under a second);
