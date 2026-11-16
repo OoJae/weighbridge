@@ -361,7 +361,8 @@ def analyze(scores: pd.DataFrame, t1_rows: Sequence[dict], label_rows: Sequence[
     outcomes = outcomes[outcomes["alias"].isin(df["alias"])]
     chosen = set(confirmatory)
     if spot_labels is not None and len(spot_labels):
-        df = df.merge(spot_check_scores(pd.DataFrame(spot_labels)), on="alias", how="left")
+        df = df.merge(spot_check_scores(pd.DataFrame(one_base_copy(spot_labels, LABEL_KEY))), on="alias",
+                      how="left")
     conf = df[df["alias"].isin(chosen)].reset_index(drop=True)
     conf = add_fitted_baselines(conf, metadata_features(manifest_rows))
     hypotheses = hypothesis_tests(conf, n_boot, seed)

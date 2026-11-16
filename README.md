@@ -3,7 +3,8 @@
 **Claim.** On 106 public LoRA adapters of Tiny Aya Global from 69 authors, a score read from the weights alone
 (about 3 CPU-seconds per adapter) ranked measured harmful-compliance drift at Spearman ρ = 0.48 (95% CI 0.27 to 0.66,
 author-clustered, pre-registered), against ρ = 0.34 (0.10 to 0.54) for a forward pass over 40 harmful prompts (about 37
-GPU-seconds) and ρ = −0.04 for the size of the weight change. A training-free rank-4 projection halved one drifted
+GPU-seconds) and ρ = −0.04 for the size of the weight change; a 50-prompt behavioural spot-check, the pre-registered
+reference, reached ρ = 0.65 at about 20 times the cost on a GPU. A training-free rank-4 projection halved one drifted
 adapter's harmful-compliance increase with 3 points of added over-refusal, but did not transfer to a longer-trained one.
 
 > Content warning: this project studies requests for harmful content. Harmful completions are never shown; they
@@ -25,7 +26,8 @@ before any behaviour was measured, including a rule that kills the weights-only 
 We also report what fine-tuning did to safety in English, Yoruba and Nigerian Pidgin, with native-speaker labels, and
 we test a training-free repair that projects the drifted direction out of an adapter while keeping it a LoRA.
 The weights-only screen passed all three pre-registered tests and earned the "usable screen" verdict: it beats one
-forward pass, the size of the weight change, SafeLoRA overlap and two fitted baselines. Most public adapters left
+forward pass, the size of the weight change, SafeLoRA overlap and two fitted baselines, though not a 50-prompt
+behavioural spot-check, which costs about 20 times more on a GPU. Most public adapters left
 English safety unchanged; in Yoruba, more than a quarter became more likely to refuse harmless requests. Native labels
 show that the safety judge misses harmful compliance in Yoruba and over-calls it in Pidgin. The repair met only part of
 its pre-registered criteria.
@@ -35,7 +37,7 @@ its pre-registered criteria.
 | Question | Answer |
 |---|---|
 | What did we test? | Whether an adapter's weights alone predict its measured safety drift, on 106 adapters other people released (69 authors) |
-| Headline | Weights-only ρ = 0.48 (0.27 to 0.66); one forward pass ρ = 0.34 (0.10 to 0.54); weight-change size ρ = −0.04; noise ceiling 0.84 |
+| Headline | Weights-only ρ = 0.48 (0.27 to 0.66); one forward pass ρ = 0.34 (0.10 to 0.54); weight-change size ρ = −0.04; 50-prompt spot-check (reference) 0.65; noise ceiling 0.84; random-direction bar 0.20 |
 | Pre-registered verdict | **Usable screen** (`PREREG.md` §12): H1, H2 and H3 all pass after Holm correction |
 | Before → after (repair) | rank-4 projection recovered 50% of one sentinel's drift (+3 points over-refusal, KL 0.002), 13% on the held-out one; criteria not met |
 | Yoruba and Pidgin | Yoruba: 28% of adapters more refusing or over-refusing (judge); native labels: benign Yoruba refused or deflected 35% vs 0% for base. Pidgin: no harmful compliance in native labels (0 of 76 adapter replies). Judge κ vs native: 0.76 Yoruba, 0.59 Pidgin |
@@ -192,7 +194,11 @@ resamples, seed 0. Y is the change in harmful compliance on 150 prompts versus t
 | Spectral features, ridge, leave-one-author-out | < 1 CPU-s | −0.18 [−0.37, 0.04] |
 | Configuration metadata, ridge, leave-one-author-out | none | −0.18 [−0.38, 0.04] |
 | SafeLoRA overlap with Global − Base | < 0.1 CPU-s | 0.00 [−0.23, 0.24] |
+| 50-prompt behavioural spot-check (reference, not a screen) | ≈ 65 GPU-s (T4) plus a judge | 0.65 [0.50, 0.76] |
 | Noise ceiling (split-half reliability of Y) | | 0.84 |
+
+The spot-check generates and judges replies to 50 harmful prompts disjoint from the outcome panel. It was
+pre-registered as a behavioural reference ceiling, and it ranks drift better than any screen that does not generate.
 
 The same three tests pass on the benign task adapters alone (59 adapters): D0b ρ = 0.49 [0.23, 0.69].
 
@@ -200,7 +206,8 @@ The same three tests pass on the benign task adapters alone (59 adapters): D0b �
 - Irrelevant-metric gradient: ρ = −0.27 [−0.50, −0.03]. It is not null on its own. It is correlated with D0b (ρ = −0.53),
   though, and carries no signal once D0b is accounted for (exploratory partial ρ = −0.03), while D0b keeps ρ = 0.41
   given the control.
-- 200 random directions: [pending, filled from the control run].
+- 200 random directions (`PREREG.md` §11, bar rule §12): the 95th percentile of their ρ with Y is 0.20. D0b (0.48) and D1 (0.34)
+  clear this bar; D0a (0.18) does not, so D0a is not called a screen.
 - **Exploratory robustness** (not pre-registered): dropping the three adapters with the largest drift gives ρ = 0.45;
   leaving out any one author gives ρ between 0.45 and 0.52. The adapter with the largest drift ranks first of 106 by
   D0b.
@@ -213,7 +220,7 @@ Cells with fewer than 5 authors are suppressed (`docs/ETHICS.md`).
 | Language and condition | More harmful | Format collapse | Safer or over-refusing | Unchanged |
 |---|---|---|---|---|
 | English, shipped | fewer than 5 adapters | 0% (0–3) | 8% (4–15) | 89% (81–93) |
-| English, no preamble | [pending] | | | |
+| English, no preamble | fewer than 5 adapters | 0% (0–3) | 8% (4–15) | 90% (83–94) |
 | Yoruba, shipped | 0% (0–3) | 7% (4–14) | **28% (20–37)** | 64% (55–73) |
 | Nigerian Pidgin, shipped | judge not used (κ < 0.6); see native labels below | | | |
 
@@ -285,11 +292,13 @@ pre-registered. A string-matching refusal detector reached κ = 0.16 on the Engl
 |---|---|---|---|
 | Weights only (D0b) | ≈ 3 CPU-s | ≈ 6 CPU-min | 0.48 |
 | One forward pass (D1) | ≈ 37 GPU-s (T4) | ≈ 65 GPU-min | 0.34 |
+| Spot-check (generate 50 replies and judge them) | ≈ 65 GPU-s (T4) | ≈ 115 GPU-min | 0.65 |
 | Full evaluation (generate 250 replies and judge them) | ≈ 290 GPU-s (T4) | ≈ 8.5 GPU-h | 1 (by definition) |
 
 The weights-only score takes about a hundredth of the time of a full evaluation, needs no GPU and no harmful outputs,
-and ranks adapters better than the forward pass, which takes about 12 times longer on a GPU. A Hub or deployer could run it at upload time and send
-only the top-ranked adapters to a full evaluation. The base-model gradient it needs is computed once (about 34 GPU-min).
+and ranks adapters better than the forward pass, which takes about 12 times longer on a GPU. A 50-prompt spot-check
+ranks better still (0.65), at about 20 times the time on a GPU plus a judge model. A Hub or deployer could run the
+weights-only score on every upload, spot-check the top-ranked adapters, and send those that fail to a full evaluation. The base-model gradient it needs is computed once (about 34 GPU-min).
 
 Total spend: $0. GPU stages ran on Kaggle's free T4 ×2 sessions and free Colab T4 sessions; scoring ran on a Kaggle CPU
 session; analysis ran on a laptop.
@@ -333,8 +342,13 @@ session; analysis ran on a laptop.
 - Aggregate results: `results/` (pre-registered analysis output with small cells suppressed, judge validation, native
   agreement counts), rebuilt by `notebooks/reproduce.ipynb`.
 - Decisions log: `DECISIONS.md`. Ethics: `docs/ETHICS.md`. Related work: `docs/RELATED_WORK.md`.
-- Hugging Face model collection: [link] (sentinels, repaired sentinels, base-model meter artifacts).
-- Hugging Face dataset collection: [link] (prompt panels, aggregate tables, base-model and sentinel logs, native labels).
+- Hugging Face collection: [link]. It holds:
+  - the four sentinel adapters;
+  - `hefbruhi/weighbridge-meters`, the base-model files the weights-only screens read (score an adapter on a CPU in
+    under a second);
+  - `hefbruhi/weighbridge-results`, with the prompt panels, aggregate tables, native-agreement counts, judge labels for
+    the base model and the sentinels, and the repair report.
+- Repaired sentinels are not uploaded; `jobs/job_c3.py` rebuilds them deterministically from the published sentinels.
 - Upstream pull requests: none filed in Stage 1.
 
 ## Reproduction
